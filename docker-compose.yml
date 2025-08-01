@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./data/db/flipkart.db
+      - DEBUG_MODE=true
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      - redis
+    networks:
+      - flipkart-network
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - flipkart-network
+
+  # PostgreSQL (for production)
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: flipkart_search
+      POSTGRES_USER: flipkart
+      POSTGRES_PASSWORD: password123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - flipkart-network
+
+  # Frontend (React)
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - flipkart-network
+
+  # Nginx (for production)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - flipkart-network
+
+networks:
+  flipkart-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
