@@ -84,30 +84,43 @@ router = APIRouter(prefix="/api/v2", tags=["search"])
 v1_router = APIRouter(prefix="/api/v1", tags=["analytics"])
 
 # Load product data
+PRODUCTS_DATA = []
+
 def load_product_data():
     """Load product data from JSON file"""
+    global PRODUCTS_DATA
+    if PRODUCTS_DATA:  # Already loaded
+        return PRODUCTS_DATA
+        
     try:
         json_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw", "products.json")
         if os.path.exists(json_path):
             with open(json_path, 'r', encoding='utf-8') as f:
-                return json.load(f)[:1000]  # Limit for demo
+                PRODUCTS_DATA = json.load(f)[:1000]  # Limit for demo
+                print(f"Loaded {len(PRODUCTS_DATA)} products for search v2")
     except Exception as e:
         print(f"Error loading product data: {e}")
-    return []
-
-PRODUCTS_DATA = load_product_data()
+        PRODUCTS_DATA = []
+    return PRODUCTS_DATA
 
 # Initialize spell checker
+SPELL_CHECKER = None
 def init_spell_checker():
     """Initialize spell checker with product vocabulary"""
+    global SPELL_CHECKER
+    if SPELL_CHECKER is not None:  # Already initialized
+        return SPELL_CHECKER
+        
     if not SYMSPELL_AVAILABLE:
         return None
+    
+    products = load_product_data()  # Ensure products are loaded
     
     spell_checker = SymSpell(max_dictionary_edit_distance=2, prefix_length=7)
     
     # Build dictionary from product data
     word_counts = {}
-    for product in PRODUCTS_DATA:
+    for product in products:
         # Add words from title, brand, category
         words = []
         if product.get('title'):
@@ -130,13 +143,13 @@ def init_spell_checker():
         spell_checker.create_dictionary_entry(word, count)
     
     print(f"Spell checker initialized with {len(word_counts)} words")
+    SPELL_CHECKER = spell_checker
     return spell_checker
-
-SPELL_CHECKER = init_spell_checker()
 
 def check_spelling(query: str) -> tuple[str, bool]:
     """Check spelling and return corrected query if needed"""
-    if not SPELL_CHECKER:
+    spell_checker = init_spell_checker()  # Lazy initialization
+    if not spell_checker:
         return query, False
     
     words = query.lower().split()
@@ -150,7 +163,7 @@ def check_spelling(query: str) -> tuple[str, bool]:
             continue
             
         # Get spell suggestions
-        suggestions = SPELL_CHECKER.lookup(word, Verbosity.CLOSEST, max_edit_distance=2)
+        suggestions = spell_checker.lookup(word, Verbosity.CLOSEST, max_edit_distance=2)
         
         if suggestions and suggestions[0].term != word:
             # Only use correction if it's significantly more frequent
@@ -227,6 +240,8 @@ def search_products(query: str, category: Optional[str] = None, brand: Optional[
                    min_rating: Optional[float] = None) -> List[Dict]:
     """Enhanced search implementation with natural language price parsing"""
     
+    products = load_product_data()  # Ensure products are loaded
+    
     # Parse query for price constraints if not explicitly provided
     if min_price is None and max_price is None:
         search_terms, parsed_min_price, parsed_max_price = parse_query_with_price(query)
@@ -240,7 +255,7 @@ def search_products(query: str, category: Optional[str] = None, brand: Optional[
     
     results = []
     
-    for i, product in enumerate(PRODUCTS_DATA):
+    for i, product in enumerate(products):
         score = 0.0
         
         # Title matching

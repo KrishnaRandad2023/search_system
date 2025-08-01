@@ -33,6 +33,13 @@ class ProductFeedback(BaseModel):
     session_id: Optional[str] = Field(None, description="User session ID")
 
 
+class UserSuggestion(BaseModel):
+    """User suggestion schema"""
+    suggestion: str = Field(..., description="User suggestion for improvement")
+    category: Optional[str] = Field(None, description="Suggestion category")
+    session_id: Optional[str] = Field(None, description="User session ID")
+
+
 @router.post("/search")
 async def submit_search_feedback(
     feedback: SearchFeedback,
@@ -100,15 +107,13 @@ async def submit_product_feedback(
 
 @router.post("/suggestion")
 async def submit_suggestion(
-    suggestion: str = Field(..., description="User suggestion for improvement"),
-    category: Optional[str] = Field(None, description="Suggestion category"),
-    session_id: Optional[str] = Field(None, description="User session ID"),
+    suggestion_data: UserSuggestion,
     db: Session = Depends(get_db)
 ):
     """Submit general suggestions for improvement"""
     try:
         # Log the suggestion
-        print(f"User Suggestion: {suggestion} (Category: {category})")
+        print(f"User Suggestion: {suggestion_data.suggestion} (Category: {suggestion_data.category})")
         
         return {
             "status": "success",

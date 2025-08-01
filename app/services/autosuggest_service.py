@@ -172,9 +172,72 @@ class TrieAutosuggest:
                     
                     if category:
                         self._insert(category.lower(), frequency // 3, "category", {"category": category})
+            
+            # ENHANCEMENT: Load Amazon lite data for richer suggestions
+            self._load_amazon_lite_data()
                         
         except Exception as e:
             logger.error(f"Error building Trie from JSON: {e}")
+    
+    def _load_amazon_lite_data(self):
+        """Load Amazon lite data for enhanced autosuggest (SAFE ENHANCEMENT)"""
+        try:
+            # Load Amazon prefix mappings
+            prefix_map_file = Path("data/amazon_lite_prefix_map.json")
+            if prefix_map_file.exists():
+                logger.info("Loading Amazon lite prefix mappings...")
+                with open(prefix_map_file, 'r', encoding='utf-8') as f:
+                    prefix_data = json.load(f)
+                
+                # Add top suggestions from prefix map (limit for performance)
+                count = 0
+                for prefix, suggestions in prefix_data.items():
+                    if count >= 10000:  # Safety limit
+                        break
+                    
+                    # Add the prefix itself
+                    if len(prefix) > 2:  # Skip very short prefixes
+                        self._insert(prefix.lower(), 50, "amazon_prefix", {
+                            "text": prefix,
+                            "source": "amazon_lite"
+                        })
+                    
+                    # Add top suggestions for this prefix
+                    for suggestion in suggestions[:3]:  # Top 3 suggestions only
+                        if len(suggestion) > 2:
+                            self._insert(suggestion.lower(), 75, "amazon_suggestion", {
+                                "text": suggestion,
+                                "source": "amazon_lite",
+                                "prefix": prefix
+                            })
+                    count += 1
+                
+                logger.info(f"Loaded Amazon prefix mappings: {count} prefixes processed")
+            
+            # Load Amazon suggestions
+            suggestions_file = Path("data/amazon_lite_suggestions.json")
+            if suggestions_file.exists():
+                logger.info("Loading Amazon lite suggestions...")
+                with open(suggestions_file, 'r', encoding='utf-8') as f:
+                    suggestions_data = json.load(f)
+                
+                # Add popular suggestions (limit for performance)
+                count = 0
+                for item in suggestions_data[:20000]:  # Safety limit: top 20k suggestions
+                    prefixes = item.get('prefixes', [])
+                    for prefix in prefixes[:5]:  # Top 5 prefixes per item
+                        if len(prefix) > 2 and count < 15000:  # Double safety limit
+                            self._insert(prefix.lower(), 60, "amazon_popular", {
+                                "text": prefix,
+                                "source": "amazon_suggestions"
+                            })
+                            count += 1
+                
+                logger.info(f"Loaded Amazon suggestions: {count} suggestions processed")
+            
+        except Exception as e:
+            logger.warning(f"Could not load Amazon lite data (system will work without it): {e}")
+            # System continues to work normally without Amazon data
     
     def _insert(self, text: str, frequency: int, suggestion_type: str, metadata: Dict):
         """Insert a suggestion into the Trie"""

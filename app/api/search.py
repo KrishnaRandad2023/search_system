@@ -59,21 +59,21 @@ async def search_products(
         query_to_search = corrected_query if has_typo_correction else q
         query_lower = query_to_search.lower().strip()
         
-        # Build base query
-        base_query = db.query(Product).filter(Product.is_active == True)
+        # Build base query - Enhanced to use correct schema
+        base_query = db.query(Product).filter(Product.is_available == True)
         
-        # Add stock filter
+        # Add stock filter - Enhanced to use correct column
         if in_stock:
-            base_query = base_query.filter(Product.stock > 0)
+            base_query = base_query.filter(Product.stock_quantity > 0)
         
-        # Text search
+        # Text search - Enhanced to match actual schema
         search_conditions = [
             Product.title.ilike(f"%{query_lower}%"),
             Product.description.ilike(f"%{query_lower}%"),
             Product.brand.ilike(f"%{query_lower}%"),
             Product.category.ilike(f"%{query_lower}%"),
-            Product.subcategory.ilike(f"%{query_lower}%"),
-            Product.product_type.ilike(f"%{query_lower}%")
+            Product.subcategory.ilike(f"%{query_lower}%")
+            # Removed product_type as it doesn't exist in actual schema
         ]
         
         # Apply text search
@@ -99,19 +99,20 @@ async def search_products(
         if min_rating is not None:
             search_query = search_query.filter(Product.rating >= min_rating)
         
-        # Apply sorting
+        # Apply sorting - Enhanced to use correct column names
         if sort_by == "price_low":
-            search_query = search_query.order_by(Product.price.asc())
+            search_query = search_query.order_by(Product.current_price.asc())
         elif sort_by == "price_high":
-            search_query = search_query.order_by(Product.price.desc())
+            search_query = search_query.order_by(Product.current_price.desc())
         elif sort_by == "rating":
             search_query = search_query.order_by(Product.rating.desc(), Product.num_ratings.desc())
         elif sort_by == "popularity":
             search_query = search_query.order_by(Product.num_ratings.desc(), Product.rating.desc())
         else:  # relevance
-            # Simple relevance scoring based on title match priority
+            # Enhanced relevance scoring with more signals
             search_query = search_query.order_by(
                 Product.is_bestseller.desc(),
+                Product.is_featured.desc(),  # Enhanced with featured products
                 Product.rating.desc(),
                 Product.num_ratings.desc()
             )
@@ -176,7 +177,7 @@ async def search_products(
         except Exception as log_error:
             print(f"Warning: Could not log search query: {log_error}")
         
-        # Convert to response format
+        # Convert to response format - Enhanced with correct schema mapping
         product_responses = [
             ProductResponse(
                 product_id=product.product_id,
@@ -185,16 +186,16 @@ async def search_products(
                 category=product.category,
                 subcategory=product.subcategory,
                 brand=product.brand,
-                price=product.price,
+                price=product.current_price,  # Enhanced mapping
                 original_price=product.original_price,
-                discount_percentage=product.discount_percentage,
+                discount_percentage=product.discount_percent,  # Enhanced mapping
                 rating=product.rating,
                 num_ratings=product.num_ratings,
-                num_reviews=product.num_reviews,
-                stock=product.stock,
+                num_reviews=product.num_ratings,  # Use num_ratings as proxy
+                stock=product.stock_quantity,  # Enhanced mapping
                 is_bestseller=product.is_bestseller,
-                is_new_arrival=product.is_new_arrival,
-                image_url=product.image_url
+                is_new_arrival=product.is_featured,  # Enhanced: use is_featured as proxy
+                image_url=product.images  # Enhanced mapping
             )
             for product in products
         ]
@@ -273,16 +274,16 @@ async def get_similar_products(
                 category=product.category,
                 subcategory=product.subcategory,
                 brand=product.brand,
-                price=product.price,
+                price=product.current_price,  # Enhanced mapping
                 original_price=product.original_price,
-                discount_percentage=product.discount_percentage,
+                discount_percentage=product.discount_percent,  # Enhanced mapping
                 rating=product.rating,
                 num_ratings=product.num_ratings,
-                num_reviews=product.num_reviews,
-                stock=product.stock,
+                num_reviews=product.num_ratings,  # Use num_ratings as proxy
+                stock=product.stock_quantity,  # Enhanced mapping
                 is_bestseller=product.is_bestseller,
-                is_new_arrival=product.is_new_arrival,
-                image_url=product.image_url
+                is_new_arrival=product.is_featured,  # Enhanced: use is_featured as proxy
+                image_url=product.images  # Enhanced mapping
             )
             for product in similar_products
         ]

@@ -72,14 +72,14 @@ async def get_autosuggest(
         if len(suggestions) < limit:
             remaining_limit = limit - len(suggestions)
             
-            # Search product titles for additional suggestions
+            # Search product titles for additional suggestions - Enhanced with correct schema
             product_query = db.query(Product).filter(
                 or_(
                     Product.title.ilike(f"%{query_lower}%"),
                     Product.brand.ilike(f"%{query_lower}%"),
                     Product.category.ilike(f"%{query_lower}%")
                 ),
-                Product.is_active == True
+                Product.is_available == True  # Enhanced: use correct column
             )
             
             if category:

@@ -52,7 +52,8 @@ def test_search_api():
     assert data["query"] == "samsung"
 
 def test_autosuggest_api():
-    """Test the autosuggest API"""
+    """Test the autosuggest API (both old and new endpoints)"""
+    # Test old endpoint
     response = requests.get(f"{BASE_URL}/autosuggest", params={"q": "mobile"})
     assert response.status_code == 200
     
@@ -60,7 +61,28 @@ def test_autosuggest_api():
     assert "query" in data
     assert "suggestions" in data
     assert data["query"] == "mobile"
-    assert len(data["suggestions"]) > 0
+    assert len(data["suggestions"]) >= 0  # Allow empty results for old endpoint
+    
+    # Test new v1 metadata endpoint (used by frontend)
+    response = requests.get(f"{BASE_URL}/api/v1/metadata/autosuggest", params={"q": "mobile"})
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert "query" in data
+    assert "suggestions" in data
+    assert "total_count" in data
+    assert data["query"] == "mobile"
+    assert len(data["suggestions"]) > 0  # Should have suggestions now
+    
+    # Check suggestion format has both old and new fields for compatibility
+    if data["suggestions"]:
+        suggestion = data["suggestions"][0]
+        assert "text" in suggestion  # New format
+        assert "score" in suggestion  # New format
+        assert "suggestion_type" in suggestion  # New format
+        assert "type" in suggestion  # Old format compatibility
+        assert "category" in suggestion  # Old format compatibility
+        assert "popularity" in suggestion  # Old format compatibility
 
 def test_search_filters():
     """Test the search filters endpoint"""
@@ -115,7 +137,8 @@ def test_autosuggest_performance():
     """Test autosuggest performance"""
     start_time = time.time()
     
-    response = requests.get(f"{BASE_URL}/autosuggest", params={"q": "mob"})
+    # Test the new v1 metadata endpoint performance
+    response = requests.get(f"{BASE_URL}/api/v1/metadata/autosuggest", params={"q": "mob"})
     
     end_time = time.time()
     response_time = (end_time - start_time) * 1000

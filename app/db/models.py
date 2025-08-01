@@ -13,7 +13,7 @@ Base = declarative_base()
 
 
 class Product(Base):
-    """Product model"""
+    """Product model - Exact match to database schema"""
     __tablename__ = "products"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -22,33 +22,52 @@ class Product(Base):
     description = Column(Text)
     category = Column(String(100), nullable=False, index=True)
     subcategory = Column(String(100), index=True)
-    product_type = Column(String(100), index=True)
     brand = Column(String(100), index=True)
+    specifications = Column(Text)
     
-    # Pricing
-    price = Column(Float, nullable=False, index=True)
+    # Pricing - Exact schema match
     original_price = Column(Float)
-    discount_percentage = Column(Integer)
+    current_price = Column(Float, nullable=False, index=True)
+    discount_percent = Column(Float)
+    savings = Column(Float)
     
     # Ratings and Reviews
     rating = Column(Float, index=True)
     num_ratings = Column(Integer, default=0)
-    num_reviews = Column(Integer, default=0)
     
     # Inventory
-    stock = Column(Integer, default=0)
+    stock_quantity = Column(Integer, default=0)
+    is_available = Column(Boolean, default=True, index=True)
     
-    # Flags
-    is_bestseller = Column(Boolean, default=False, index=True)
-    is_new_arrival = Column(Boolean, default=False, index=True)
-    is_active = Column(Boolean, default=True, index=True)
+    # Seller information
+    seller_name = Column(String(200))
+    seller_rating = Column(Float)
+    seller_location = Column(String(200))
     
-    # Media
-    image_url = Column(String(500))
+    # Policies
+    return_policy = Column(Text)
+    exchange_available = Column(Boolean, default=False)
+    cod_available = Column(Boolean, default=False)
+    
+    # Media and metadata
+    images = Column(Text)
+    tags = Column(Text)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Metrics
+    views = Column(Integer, default=0)
+    purchases = Column(Integer, default=0)
+    
+    # Flags - Exact order as in database
+    is_featured = Column(Boolean, default=False, index=True)
+    is_bestseller = Column(Boolean, default=False, index=True)
+    
+    # Delivery
+    delivery_days = Column(Integer)
+    free_delivery = Column(Boolean, default=False)
     
     def __repr__(self):
         return f"<Product(id={self.product_id}, title='{self.title[:50]}...')>"

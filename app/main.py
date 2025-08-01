@@ -12,7 +12,27 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from loguru import logger
 
-from app.api import autosuggest, search, health, analytics, feedback
+from app.api import autosuggest, search, health, analytics, feedback, database_admin, system_demo
+try:
+    from app.api import direct_search
+    DIRECT_SEARCH_AVAILABLE = True
+except ImportError:
+    DIRECT_SEARCH_AVAILABLE = False
+    logger.warning("Direct search API not available")
+
+try:
+    from app.api import search_v2
+    SEARCH_V2_AVAILABLE = True
+except ImportError:
+    SEARCH_V2_AVAILABLE = False
+    logger.warning("Search v2 API not available")
+
+try:
+    from app.api import v1_endpoints
+    V1_ENDPOINTS_AVAILABLE = True
+except ImportError:
+    V1_ENDPOINTS_AVAILABLE = False
+    logger.warning("V1 endpoints API not available")
 from app.config.settings import get_settings
 from app.utils.logger import setup_logging
 from app.db.database import init_db
@@ -209,7 +229,9 @@ async def home():
         <script>
             function testSearch() {
                 const query = document.getElementById('searchInput').value || 'mobile';
-                fetch(`/search?q=${encodeURIComponent(query)}&limit=5`)
+                // Try direct search first (working), fallback to regular search
+                const searchUrl = '/api/v1/direct/search';
+                fetch(`${searchUrl}?q=${encodeURIComponent(query)}&limit=5`)
                     .then(response => response.json())
                     .then(data => {
                         const results = document.getElementById('results');
@@ -221,7 +243,7 @@ async def home():
                                 ${data.products.map(product => `
                                     <div style="border: 1px solid #e2e8f0; padding: 10px; margin: 5px 0; border-radius: 5px;">
                                         <strong>${product.title}</strong><br>
-                                        <span style="color: #2874f0;">₹${product.price}</span> | 
+                                        <span style="color: #2874f0;">₹${product.current_price}</span> | 
                                         <span style="color: #10b981;">★${product.rating}</span> | 
                                         <span>${product.category}</span>
                                     </div>
@@ -230,19 +252,42 @@ async def home():
                         `;
                     })
                     .catch(error => {
-                        document.getElementById('results').innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+                        // Fallback to regular search if direct search fails
+                        fetch(`/search?q=${encodeURIComponent(query)}&limit=5`)
+                            .then(response => response.json())
+                            .then(data => {
+                                const results = document.getElementById('results');
+                                results.style.display = 'block';
+                                results.innerHTML = `
+                                    <h4>🔍 Search Results for "${data.query}" (Fallback)</h4>
+                                    <p><strong>Total:</strong> ${data.total_count} products found</p>
+                                    <div style="max-height: 300px; overflow-y: auto;">
+                                        ${data.products.map(product => `
+                                            <div style="border: 1px solid #e2e8f0; padding: 10px; margin: 5px 0; border-radius: 5px;">
+                                                <strong>${product.title}</strong><br>
+                                                <span style="color: #2874f0;">₹${product.price}</span> | 
+                                                <span style="color: #10b981;">★${product.rating}</span> | 
+                                                <span>${product.category}</span>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                `;
+                            })
+                            .catch(fallbackError => {
+                                document.getElementById('results').innerHTML = `<p style="color: red;">Search Error: ${fallbackError.message}</p>`;
+                            });
                     });
             }
             
             function testAutosuggest() {
                 const query = document.getElementById('searchInput').value || 'mob';
-                fetch(`/autosuggest?q=${encodeURIComponent(query)}&limit=8`)
+                fetch(`/api/v1/metadata/autosuggest?q=${encodeURIComponent(query)}&limit=8`)
                     .then(response => response.json())
                     .then(data => {
                         const results = document.getElementById('results');
                         results.style.display = 'block';
                         results.innerHTML = `
-                            <h4>💡 Autosuggest for "${data.query}"</h4>
+                            <h4>💡 Autosuggest for "${data.query}" (${data.total_count || data.suggestions.length} results)</h4>
                             <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">
                                 ${data.suggestions.map(suggestion => `
                                     <span style="background: #2874f0; color: white; padding: 5px 10px; border-radius: 15px; font-size: 14px;">
@@ -302,8 +347,17 @@ async def api_info():
 app.include_router(health.router, prefix="/health", tags=["Health"])
 app.include_router(autosuggest.router, prefix="/autosuggest", tags=["Autosuggest"])
 app.include_router(search.router, prefix="/search", tags=["Search"])
+if SEARCH_V2_AVAILABLE:
+    app.include_router(search_v2.router, tags=["Search v2"])  # Frontend search API 
+    app.include_router(search_v2.v1_router, tags=["Search v2 Analytics"])  # v1 compatibility for tracking
+if V1_ENDPOINTS_AVAILABLE:
+    app.include_router(v1_endpoints.router, prefix="/api/v1/metadata", tags=["API v1 Metadata"])  # Other frontend API endpoints
+if DIRECT_SEARCH_AVAILABLE:
+    app.include_router(direct_search.router, tags=["Direct Search"])  # Working search endpoint
 app.include_router(analytics.router, prefix="/analytics", tags=["Analytics"]) 
 app.include_router(feedback.router, prefix="/feedback", tags=["Feedback"])
+app.include_router(database_admin.router, tags=["Database Admin"])  # Admin endpoints
+app.include_router(system_demo.router, tags=["System Demo"])  # Demo endpoints
 
 
 # Global exception handler

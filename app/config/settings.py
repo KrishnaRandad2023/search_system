@@ -18,9 +18,9 @@ class Settings(BaseSettings):
     DEBUG_MODE: bool = Field(default=True, description="Debug mode")
     WORKERS: int = Field(default=4, description="Number of workers")
     
-    # Database Configuration
+    # Database Configuration - Fixed to use correct database file
     DATABASE_URL: str = Field(
-        default="sqlite:///./data/db/flipkart.db",
+        default="sqlite:///./data/flipkart_products.db",
         description="Database URL"
     )
     TEST_DATABASE_URL: str = Field(
@@ -116,7 +116,7 @@ class Settings(BaseSettings):
         extra = "ignore"  # Ignore extra environment variables
 
 
-@lru_cache()
+# @lru_cache()  # Temporarily disabled for database fix
 def get_settings() -> Settings:
     """Get cached settings instance"""
     return Settings()
