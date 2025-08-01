@@ -59,6 +59,87 @@ async def search_products(
         query_to_search = corrected_query if has_typo_correction else q
         query_lower = query_to_search.lower().strip()
         
+        # SEMANTIC SEARCH ENHANCEMENT - Apply same intelligence as autosuggest
+        # This will make "smartphone" also search for "mobile", "phone", "device"
+        semantic_search_terms = set([query_lower])  # Start with original query
+        query_words = query_lower.split()
+        
+        # Use the same semantic synonyms mapping for consistent intelligence
+        semantic_synonyms = {
+            # Device Intelligence (with brand awareness)
+            "phone": ["mobile", "smartphone", "cellphone", "handset", "device"],
+            "mobile": ["phone", "smartphone", "cell", "handset", "device"], 
+            "smartphone": ["phone", "mobile", "android", "iphone", "cell"],
+            "laptop": ["notebook", "computer", "pc", "ultrabook", "macbook"],
+            "notebook": ["laptop", "computer", "pc", "netbook", "chromebook"],
+            "computer": ["laptop", "pc", "desktop", "workstation", "system"],
+            "tablet": ["ipad", "slate", "pad", "touchscreen", "android tablet"],
+            "watch": ["smartwatch", "timepiece", "wristwatch", "tracker"],
+            "smartwatch": ["watch", "tracker", "wearable", "band", "fitness"],
+            "tv": ["television", "smart tv", "led", "oled", "monitor"],
+            "monitor": ["display", "screen", "led", "gaming monitor", "4k"],
+            
+            # Audio Intelligence (with quality tiers)
+            "headphones": ["headset", "earphones", "earbuds", "audio", "cans"],
+            "earphones": ["headphones", "earbuds", "headset", "buds", "in-ear"],
+            "earbuds": ["earphones", "headphones", "buds", "pods", "in-ear"],
+            "headset": ["headphones", "gaming headset", "mic headset", "audio"],
+            "speaker": ["audio", "sound", "bluetooth speaker", "wireless speaker"],
+            "airpods": ["earbuds", "wireless earbuds", "apple earbuds", "pods"],
+            "buds": ["earbuds", "earphones", "pods", "wireless buds", "galaxy buds"],
+            
+            # Connectivity Intelligence
+            "wireless": ["bluetooth", "wifi", "cordless", "bt", "cable-free"],
+            "bluetooth": ["wireless", "bt", "cordless", "paired", "connected"],
+            "wifi": ["wireless", "internet", "network", "connectivity", "router"],
+            "wired": ["cable", "corded", "plugged", "usb", "aux"],
+            
+            # Accessory Intelligence
+            "bag": ["case", "pouch", "backpack", "handbag", "tote"],
+            "case": ["cover", "shell", "protector", "skin", "sleeve"],
+            "cover": ["case", "protector", "shell", "skin", "guard"],
+            "charger": ["adapter", "power bank", "cable", "charging dock"],
+            "cable": ["wire", "cord", "charger", "connector", "lead"],
+            
+            # Gaming Intelligence
+            "gaming": ["gamer", "esports", "pro gaming", "competitive", "rgb"],
+            "gamer": ["gaming", "esports", "pro", "competitive", "streamer"],
+            "mechanical": ["tactile", "clicky", "switches", "gaming keyboard"],
+            
+            # Brand Intelligence
+            "apple": ["iphone", "macbook", "ipad", "airpods", "mac", "ios"],
+            "samsung": ["galaxy", "note", "tab", "buds", "gear", "android"],
+            "sony": ["playstation", "xperia", "walkman", "bravia", "audio"],
+            "microsoft": ["surface", "xbox", "windows", "office", "pc"],
+            "google": ["pixel", "android", "chrome", "nest", "assistant"],
+            
+            # Colors for product search
+            "red": ["maroon", "burgundy", "crimson", "cherry", "scarlet"],
+            "blue": ["navy", "azure", "royal blue", "sky blue", "cobalt"],
+            "black": ["dark", "charcoal", "midnight", "ebony", "jet"],
+            "white": ["cream", "ivory", "pearl", "snow", "silver"],
+        }
+        
+        # Expand search terms with semantic synonyms
+        for word in query_words:
+            if word in semantic_synonyms:
+                # Add top 3 synonyms for better recall without too much noise
+                for synonym in semantic_synonyms[word][:3]:
+                    semantic_search_terms.add(synonym)
+                    # Also add multi-word combinations
+                    for other_word in query_words:
+                        if other_word != word:
+                            semantic_search_terms.add(f"{synonym} {other_word}")
+                            semantic_search_terms.add(f"{other_word} {synonym}")
+        
+        # Add original query combinations
+        semantic_search_terms.add(query_lower)
+        if len(query_words) > 1:
+            # Add partial combinations
+            for i in range(len(query_words)):
+                for j in range(i+1, len(query_words)+1):
+                    semantic_search_terms.add(" ".join(query_words[i:j]))
+        
         # Build base query - Enhanced to use correct schema
         base_query = db.query(Product).filter(Product.is_available == True)
         
@@ -66,18 +147,35 @@ async def search_products(
         if in_stock:
             base_query = base_query.filter(Product.stock_quantity > 0)
         
-        # Text search - Enhanced to match actual schema
-        search_conditions = [
-            Product.title.ilike(f"%{query_lower}%"),
-            Product.description.ilike(f"%{query_lower}%"),
-            Product.brand.ilike(f"%{query_lower}%"),
-            Product.category.ilike(f"%{query_lower}%"),
-            Product.subcategory.ilike(f"%{query_lower}%")
-            # Removed product_type as it doesn't exist in actual schema
-        ]
+        # ENHANCED SEMANTIC TEXT SEARCH - Now searches with intelligence
+        # Instead of just searching for the exact query, search for all semantic variations
+        search_conditions = []
         
-        # Apply text search
-        search_query = base_query.filter(or_(*search_conditions))
+        # For each semantic search term, create search conditions
+        for search_term in semantic_search_terms:
+            term_conditions = [
+                Product.title.ilike(f"%{search_term}%"),
+                Product.description.ilike(f"%{search_term}%"),
+                Product.brand.ilike(f"%{search_term}%"),
+                Product.category.ilike(f"%{search_term}%"),
+                Product.subcategory.ilike(f"%{search_term}%")
+            ]
+            # Add OR condition for this term (any field can match)
+            search_conditions.extend(term_conditions)
+        
+        # Apply semantic text search (OR across all conditions)
+        if search_conditions:
+            search_query = base_query.filter(or_(*search_conditions))
+        else:
+            # Fallback to original query if no semantic terms
+            original_conditions = [
+                Product.title.ilike(f"%{query_lower}%"),
+                Product.description.ilike(f"%{query_lower}%"),
+                Product.brand.ilike(f"%{query_lower}%"),
+                Product.category.ilike(f"%{query_lower}%"),
+                Product.subcategory.ilike(f"%{query_lower}%")
+            ]
+            search_query = base_query.filter(or_(*original_conditions))
         
         # Apply filters
         if category:
@@ -108,13 +206,15 @@ async def search_products(
             search_query = search_query.order_by(Product.rating.desc(), Product.num_ratings.desc())
         elif sort_by == "popularity":
             search_query = search_query.order_by(Product.num_ratings.desc(), Product.rating.desc())
-        else:  # relevance
-            # Enhanced relevance scoring with more signals
+        else:  # relevance - ENHANCED with semantic scoring
+            # Enhanced relevance scoring with semantic intelligence
+            # Use simple but effective relevance scoring
             search_query = search_query.order_by(
                 Product.is_bestseller.desc(),
-                Product.is_featured.desc(),  # Enhanced with featured products
+                Product.is_featured.desc(),
                 Product.rating.desc(),
-                Product.num_ratings.desc()
+                Product.num_ratings.desc(),
+                Product.current_price.asc()  # Lower price as tie breaker
             )
         
         # Get total count for pagination

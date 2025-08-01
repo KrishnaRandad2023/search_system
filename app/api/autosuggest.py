@@ -45,8 +45,13 @@ async def get_autosuggest(
                 response_time_ms=0
             )
         
-        # Method 1: Search in autosuggest queries table
-        autosuggest_query = db.query(AutosuggestQuery).filter(
+        # Method 1: Search in autosuggest queries table (SAFE: only select existing columns)
+        autosuggest_query = db.query(
+            AutosuggestQuery.id,
+            AutosuggestQuery.query, 
+            AutosuggestQuery.popularity,
+            AutosuggestQuery.category
+        ).filter(
             AutosuggestQuery.query.ilike(f"%{query_lower}%")
         )
         
@@ -161,7 +166,12 @@ async def get_trending_queries(
 ):
     """Get trending/popular search queries"""
     try:
-        query = db.query(AutosuggestQuery)
+        query = db.query(
+            AutosuggestQuery.id,
+            AutosuggestQuery.query,
+            AutosuggestQuery.popularity, 
+            AutosuggestQuery.category
+        )
         
         if category:
             query = query.filter(AutosuggestQuery.category.ilike(f"%{category.lower()}%"))
