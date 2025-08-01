@@ -16,6 +16,13 @@ from app.schemas.query import SearchFilters
 from app.config.settings import get_settings
 from app.utils.spell_checker import check_spelling
 
+# Import ML service with safe fallback
+try:
+    from app.services.ml_service import get_ml_service
+    ML_SERVICE_AVAILABLE = True
+except ImportError:
+    ML_SERVICE_AVAILABLE = False
+
 router = APIRouter()
 settings = get_settings()
 
@@ -115,6 +122,43 @@ async def search_products(
         # Apply pagination
         offset = (page - 1) * limit
         products = search_query.offset(offset).limit(limit).all()
+        
+        # Apply ML ranking if available
+        if ML_SERVICE_AVAILABLE and len(products) > 1:
+            try:
+                ml_service = get_ml_service()
+                if ml_service.is_ml_available():
+                    # Convert SQLAlchemy products to dict format for ML service
+                    product_dicts = []
+                    for product in products:
+                        product_dict = {
+                            'title': product.title,
+                            'brand': product.brand,
+                            'category': product.category,
+                            'price': product.price,
+                            'rating': product.rating,
+                            'num_ratings': product.num_ratings,
+                            'is_bestseller': product.is_bestseller,
+                            'stock': product.stock,
+                            'discount_percentage': product.discount_percentage or 0
+                        }
+                        product_dicts.append(product_dict)
+                    
+                    # Apply ML ranking
+                    ranked_products = ml_service.rank_products(product_dicts, query_to_search)
+                    
+                    # Create a mapping of ML scores
+                    ml_scores = {}
+                    for i, ranked_product in enumerate(ranked_products):
+                        if i < len(products):
+                            ml_score = ranked_product.get('ml_score', ranked_product.get('simple_score', 0.5))
+                            ml_scores[products[i].product_id] = ml_score
+                    
+                    # Sort products by ML scores
+                    products.sort(key=lambda p: ml_scores.get(p.product_id, 0.5), reverse=True)
+                    
+            except Exception as e:
+                print(f"Warning: ML ranking failed, using original order: {e}")
         
         # Calculate response time
         end_time = datetime.utcnow()

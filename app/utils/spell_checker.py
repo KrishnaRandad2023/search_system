@@ -44,14 +44,14 @@ class SpellChecker:
     def _build_vocabulary(self):
         """Build spell check dictionary from product data"""
         try:
-            # Try to load from JSON file (search_v2.py format)
+            # Try to load from JSON file first (main dataset - 12,000 products)
             json_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw", "products.json")
             
             word_counts = {}
             
             if os.path.exists(json_path):
                 with open(json_path, 'r', encoding='utf-8') as f:
-                    products = json.load(f)[:1000]  # Limit for performance
+                    products = json.load(f)[:5000]  # Use first 5000 for performance
                 
                 for product in products:
                     # Extract words from various fields
@@ -60,6 +60,11 @@ class SpellChecker:
                         if product.get(field):
                             words.extend(str(product[field]).lower().split())
                     
+                    # Also extract from tags if available
+                    if product.get('tags') and isinstance(product['tags'], list):
+                        for tag in product['tags']:
+                            words.extend(str(tag).lower().split())
+                    
                     # Count word frequencies
                     for word in words:
                         # Clean word (remove special characters)
@@ -67,15 +72,34 @@ class SpellChecker:
                         if len(clean_word) > 2:  # Skip very short words
                             word_counts[clean_word] = word_counts.get(clean_word, 0) + 1
             
-            # Add common e-commerce terms manually
+            # Also load from queries for common search terms
+            queries_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw", "queries.json")
+            if os.path.exists(queries_path):
+                with open(queries_path, 'r', encoding='utf-8') as f:
+                    queries = json.load(f)
+                
+                for query in queries:
+                    query_text = query.get('query_text', '')
+                    popularity = query.get('popularity', 1)
+                    
+                    for word in query_text.lower().split():
+                        clean_word = ''.join(c for c in word if c.isalnum())
+                        if len(clean_word) > 2:
+                            # Weight by popularity
+                            word_counts[clean_word] = word_counts.get(clean_word, 0) + popularity
+            
+            # Add common e-commerce terms manually (still useful)
             common_terms = {
-                'phone': 50, 'mobile': 45, 'smartphone': 30,
-                'laptop': 40, 'computer': 35, 'tablet': 25,
-                'headphones': 30, 'earphones': 25, 'speaker': 20,
-                'shoes': 35, 'footwear': 30, 'sneakers': 25,
-                'shirt': 30, 'jeans': 28, 'dress': 25,
-                'watch': 25, 'smart': 20, 'wireless': 18,
-                'bluetooth': 15, 'gaming': 20, 'fitness': 18
+                'phone': 100, 'mobile': 90, 'smartphone': 80,
+                'laptop': 95, 'computer': 70, 'tablet': 50,
+                'headphones': 60, 'earphones': 50, 'speaker': 40,
+                'shoes': 70, 'footwear': 60, 'sneakers': 50,
+                'shirt': 60, 'jeans': 55, 'dress': 50,
+                'watch': 50, 'smart': 40, 'wireless': 35,
+                'bluetooth': 30, 'gaming': 40, 'fitness': 35,
+                'samsung': 80, 'apple': 85, 'oneplus': 70,
+                'xiaomi': 65, 'realme': 60, 'oppo': 55,
+                'vivo': 55, 'nokia': 50, 'motorola': 45
             }
             
             # Merge common terms
@@ -83,11 +107,13 @@ class SpellChecker:
                 word_counts[term] = max(word_counts.get(term, 0), count)
             
             # Add words to spell checker
+            added_count = 0
             for word, count in word_counts.items():
-                if count >= 3:  # Only add words that appear multiple times
+                if count >= 2:  # Lower threshold since we have more data
                     self.spell_checker.create_dictionary_entry(word, count)
+                    added_count += 1
             
-            print(f"📚 Spell checker vocabulary built with {len([w for w, c in word_counts.items() if c >= 3])} words")
+            print(f"📚 Spell checker vocabulary built with {added_count} words from full dataset")
             
         except Exception as e:
             print(f"⚠️ Warning: Could not build spell check vocabulary: {e}")

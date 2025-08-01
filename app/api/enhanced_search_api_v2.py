@@ -27,6 +27,22 @@ from app.utils.spell_checker import check_spelling
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Import ML service with error handling
+try:
+    from app.services.ml_service import get_ml_service
+    ML_SERVICE_AVAILABLE = True
+except ImportError:
+    ML_SERVICE_AVAILABLE = False
+    logger.warning("ML Service not available")
+
+# Import Trie autosuggest with error handling  
+try:
+    from app.services.autosuggest_service import get_trie_autosuggest
+    TRIE_AUTOSUGGEST_AVAILABLE = True
+except ImportError:
+    TRIE_AUTOSUGGEST_AVAILABLE = False
+    logger.warning("Trie Autosuggest not available")
+
 # Initialize router
 router = APIRouter(prefix="/api/v1/search", tags=["Enhanced Search"])
 
@@ -191,34 +207,36 @@ def perform_basic_search(query: str, category: Optional[str] = None,
     """Perform basic database search when advanced components are not available."""
     conn = get_db_connection()
     
-    # Build SQL query
+    # Build SQL query using the correct column names from our loaded data
     sql = """
-    SELECT id, name, category, subcategory, brand, price, original_price, 
-           discount_percentage, rating, rating_count, description, features,
-           in_stock, stock_quantity
+    SELECT id, product_id, title, category, subcategory, brand, current_price as price, 
+           original_price, discount_percent as discount_percentage, rating, num_ratings, 
+           description, specifications, stock_quantity, is_available, seller_name,
+           is_bestseller, is_featured, delivery_days, free_delivery
     FROM products
-    WHERE name LIKE ? OR description LIKE ? OR brand LIKE ?
+    WHERE (title LIKE ? OR description LIKE ? OR brand LIKE ? OR specifications LIKE ?) 
+    AND is_available = 1
     """
     
-    params = [f"%{query}%", f"%{query}%", f"%{query}%"]
+    params = [f"%{query}%", f"%{query}%", f"%{query}%", f"%{query}%"]
     
     if category:
-        sql += " AND (category = ? OR subcategory = ?)"
-        params.extend([category, category])
+        sql += " AND (category LIKE ? OR subcategory LIKE ?)"
+        params.extend([f"%{category}%", f"%{category}%"])
     
     if min_price is not None:
-        sql += " AND price >= ?"
+        sql += " AND current_price >= ?"
         params.append(str(min_price))
     
     if max_price is not None:
-        sql += " AND price <= ?"
+        sql += " AND current_price <= ?"
         params.append(str(max_price))
     
     if min_rating is not None:
         sql += " AND rating >= ?"
         params.append(str(min_rating))
     
-    sql += " ORDER BY rating DESC, rating_count DESC LIMIT ? OFFSET ?"
+    sql += " ORDER BY rating DESC, num_ratings DESC, is_bestseller DESC LIMIT ? OFFSET ?"
     params.extend([str(limit), str(offset)])
     
     try:
@@ -226,8 +244,35 @@ def perform_basic_search(query: str, category: Optional[str] = None,
         results = []
         for row in cursor.fetchall():
             result = dict(row)
-            result['relevance_score'] = 0.8  # Default score
-            result['features'] = json.loads(result['features']) if result['features'] else []
+            # Calculate relevance score based on query match
+            relevance_score = 0.5
+            query_lower = query.lower()
+            title_lower = (result.get('title') or '').lower()
+            
+            if query_lower in title_lower:
+                if title_lower.startswith(query_lower):
+                    relevance_score = 1.0
+                else:
+                    relevance_score = 0.8
+            elif query_lower in (result.get('brand') or '').lower():
+                relevance_score = 0.7
+            elif query_lower in (result.get('category') or '').lower():
+                relevance_score = 0.6
+            
+            result['relevance_score'] = relevance_score
+            result['name'] = result.get('title')  # For compatibility
+            result['rating_count'] = result.get('num_ratings')  # For compatibility
+            result['in_stock'] = result.get('is_available')  # For compatibility
+            
+            # Parse JSON fields
+            if result.get('specifications'):
+                try:
+                    result['features'] = list(json.loads(result['specifications']).values()) if result['specifications'] else []
+                except (json.JSONDecodeError, AttributeError):
+                    result['features'] = []
+            else:
+                result['features'] = []
+            
             results.append(result)
         
         conn.close()
@@ -304,12 +349,46 @@ async def enhanced_search(
                     result['business_score'] = 0.5
         
         # Apply ML ranking if available
-        if ml_ranker and request.use_ml_ranking:
+        if ML_SERVICE_AVAILABLE and request.use_ml_ranking:
+            try:
+                ml_service = get_ml_service()
+                if ml_service.is_ml_available():
+                    # Convert search results to format expected by ML service
+                    ml_products = []
+                    for result in search_results:
+                        ml_product = {
+                            'title': result.get('name', ''),
+                            'brand': result.get('brand', ''),
+                            'category': result.get('category', ''),
+                            'price': result.get('price', 0),
+                            'rating': result.get('rating', 0),
+                            'num_ratings': result.get('rating_count', 0),
+                            'is_bestseller': result.get('id', 0) % 10 == 0,  # Simple heuristic
+                            'stock': result.get('stock_quantity', 0),
+                            'discount_percentage': result.get('discount_percentage', 0)
+                        }
+                        ml_products.append(ml_product)
+                    
+                    # Apply ML ranking
+                    ranked_products = ml_service.rank_products(ml_products, effective_query)
+                    
+                    # Merge ML scores back to original results
+                    for i, (original, ranked) in enumerate(zip(search_results, ranked_products)):
+                        original['ml_score'] = ranked.get('ml_score', ranked.get('simple_score', 0.5))
+                        original['ranking_method'] = ranked.get('ranking_method', 'simple')
+                        
+                    logger.info(f"Applied ML ranking with method: {ranked_products[0].get('ranking_method', 'unknown') if ranked_products else 'none'}")
+                else:
+                    logger.info("ML components not available, using simple ranking")
+            except Exception as e:
+                logger.error(f"ML ranking error: {e}")
+        elif ml_ranker and request.use_ml_ranking:
+            # Fallback to old ML ranker if available
             try:
                 ranked_results = ml_ranker.rerank(search_results)
                 search_results = ranked_results
             except Exception as e:
-                logger.error(f"ML ranking error: {e}")
+                logger.error(f"Old ML ranking error: {e}")
         
         # Calculate final scores and sort
         for result in search_results:
@@ -381,7 +460,32 @@ async def get_suggestions(request: SuggestionRequest):
     try:
         suggestions = []
         
-        if autosuggest_engine:
+        # Try Trie-based autosuggest first
+        if TRIE_AUTOSUGGEST_AVAILABLE:
+            try:
+                trie_autosuggest = get_trie_autosuggest()
+                trie_suggestions = trie_autosuggest.get_suggestions(
+                    query=request.query,
+                    max_suggestions=request.max_suggestions
+                )
+                
+                suggestions = [
+                    SuggestionResult(
+                        text=sugg.text,
+                        type=sugg.suggestion_type,
+                        score=sugg.score,
+                        metadata=sugg.metadata
+                    )
+                    for sugg in trie_suggestions
+                ]
+                
+                logger.info(f"Trie autosuggest returned {len(suggestions)} suggestions")
+                
+            except Exception as e:
+                logger.error(f"Trie autosuggest error: {e}")
+        
+        # Fallback to existing autosuggest engine
+        if not suggestions and autosuggest_engine:
             try:
                 # Get suggestions from autosuggest engine
                 engine_suggestions = autosuggest_engine.get_suggestions(
