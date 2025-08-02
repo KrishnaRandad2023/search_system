@@ -26,9 +26,10 @@ async def seed_database():
     db_url = get_db_url()
     engine = create_engine(db_url)
     
-    # Create all tables
+    # Drop all tables first to ensure schema is updated
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created")
+    print("✅ Database tables dropped and recreated")
     
     # Create session
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

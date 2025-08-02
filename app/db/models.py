@@ -27,17 +27,27 @@ class Product(Base):
     
     # Pricing - Exact schema match
     original_price = Column(Float)
-    current_price = Column(Float, nullable=False, index=True)
+    current_price = Column(Float, nullable=True, index=True)
     discount_percent = Column(Float)
     savings = Column(Float)
+    # Discount percentage (added to match seed data)
+    discount_percentage = Column(Float)
     
     # Ratings and Reviews
     rating = Column(Float, index=True)
     num_ratings = Column(Integer, default=0)
+    # Number of reviews (added to match seed data)
+    num_reviews = Column(Integer, default=0)
     
     # Inventory
     stock_quantity = Column(Integer, default=0)
+    # Stock (added to match seed data)
+    stock = Column(Integer, default=0)
     is_available = Column(Boolean, default=True, index=True)
+    # Product type (added to match seed data)
+    product_type = Column(String(100), index=True)
+    # Price field (added to match seed data)
+    price = Column(Float, index=True)
     
     # Seller information
     seller_name = Column(String(200))
@@ -51,6 +61,8 @@ class Product(Base):
     
     # Media and metadata
     images = Column(Text)
+    # Image URL (added to match seed data)
+    image_url = Column(Text)
     tags = Column(Text)
     
     # Timestamps
@@ -64,6 +76,8 @@ class Product(Base):
     # Flags - Exact order as in database
     is_featured = Column(Boolean, default=False, index=True)
     is_bestseller = Column(Boolean, default=False, index=True)
+    # New arrival flag (added to match seed data)
+    is_new_arrival = Column(Boolean, default=False, index=True)
     
     # Delivery
     delivery_days = Column(Integer)
