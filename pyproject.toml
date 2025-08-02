@@ -9,7 +9,7 @@ description = "AI/ML-powered e-commerce search system for Flipkart Grid 7.0"
 authors = [{name = "Your Team", email = "team@example.com"}]
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.12"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
