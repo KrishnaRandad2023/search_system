@@ -17,6 +17,68 @@ router = APIRouter()
 settings = get_settings()
 
 
+def get_smart_suggestions(query: str) -> List[AutosuggestItem]:
+    """Generate smart contextual suggestions based on query patterns"""
+    suggestions = []
+    query_lower = query.lower().strip()
+    
+    # Price-range suggestions for mobiles
+    if any(word in query_lower for word in ['mobile', 'phone', 'smartphone']):
+        price_patterns = [
+            ("mobile under 10k", 5000),
+            ("mobile under 15k", 4500), 
+            ("mobile under 20k", 4000),
+            ("mobile under 30k", 3500),
+            ("best mobile under 10k", 3000),
+            ("4g mobile under 10k", 2500)
+        ]
+        for pattern, popularity in price_patterns:
+            if query_lower in pattern or pattern.startswith(query_lower):
+                suggestions.append(AutosuggestItem(
+                    text=pattern,
+                    type="price_range",
+                    category="electronics",
+                    popularity=popularity
+                ))
+    
+    # Laptop suggestions  
+    if any(word in query_lower for word in ['laptop', 'computer']):
+        laptop_patterns = [
+            ("laptop under 50k", 4000),
+            ("gaming laptop under 80k", 3500),
+            ("laptop under 30k", 3000),
+            ("best laptop under 50k", 2500),
+            ("dell laptop under 40k", 2000)
+        ]
+        for pattern, popularity in laptop_patterns:
+            if query_lower in pattern or pattern.startswith(query_lower):
+                suggestions.append(AutosuggestItem(
+                    text=pattern,
+                    type="price_range", 
+                    category="electronics",
+                    popularity=popularity
+                ))
+    
+    # Brand + category combinations
+    if len(query_lower) >= 2:
+        brand_category_patterns = [
+            ("samsung mobile", 4000), ("apple iphone", 3800), 
+            ("oneplus mobile", 3500), ("xiaomi mobile", 3200),
+            ("hp laptop", 3000), ("dell laptop", 2800),
+            ("lenovo laptop", 2600), ("asus laptop", 2400)
+        ]
+        for pattern, popularity in brand_category_patterns:
+            if query_lower in pattern or pattern.startswith(query_lower):
+                suggestions.append(AutosuggestItem(
+                    text=pattern,
+                    type="brand_category",
+                    category="electronics", 
+                    popularity=popularity
+                ))
+    
+    return suggestions[:5]  # Return top 5 smart suggestions
+
+
 @router.get("/", response_model=AutosuggestResponse)
 async def get_autosuggest(
     q: str = Query(..., description="Search query prefix", min_length=1),
@@ -32,6 +94,7 @@ async def get_autosuggest(
     - Category filtering
     - Popularity-based ranking
     - Product title suggestions
+    - Price-range aware suggestions (e.g., "mobile under 10k", "laptop under 50000")
     """
     try:
         suggestions = []
@@ -44,6 +107,43 @@ async def get_autosuggest(
                 total_count=0,
                 response_time_ms=0
             )
+
+        # Add smart contextual suggestions first (highest priority)
+        smart_suggestions = get_smart_suggestions(q)
+        suggestions.extend(smart_suggestions)
+
+        # Enhanced: Add price-range suggestions for common queries
+        price_suggestions = []
+        if any(word in query_lower for word in ['mobile', 'phone', 'smartphone']):
+            price_ranges = [
+                "mobile under 10k", "mobile under 15k", "mobile under 20k", 
+                "mobile under 30k", "mobile under 50k"
+            ]
+            for price_query in price_ranges:
+                if query_lower in price_query and price_query not in [s.text.lower() for s in suggestions]:
+                    price_suggestions.append(AutosuggestItem(
+                        text=price_query,
+                        type="price_range",
+                        category="electronics",
+                        popularity=5000
+                    ))
+        
+        if any(word in query_lower for word in ['laptop', 'computer']):
+            price_ranges = [
+                "laptop under 30k", "laptop under 50k", "laptop under 70k", 
+                "laptop under 1 lakh", "gaming laptop under 80k"
+            ]
+            for price_query in price_ranges:
+                if query_lower in price_query and price_query not in [s.text.lower() for s in suggestions]:
+                    price_suggestions.append(AutosuggestItem(
+                        text=price_query,
+                        type="price_range", 
+                        category="electronics",
+                        popularity=4000
+                    ))
+
+        # Add price suggestions to main suggestions
+        suggestions.extend(price_suggestions[:2])  # Limit to top 2 price suggestions
         
         # Method 1: Search in autosuggest queries table (SAFE: only select existing columns)
         autosuggest_query = db.query(
@@ -101,44 +201,65 @@ async def get_autosuggest(
             seen_suggestions = {s.text.lower() for s in suggestions}
             
             for product in product_results:
+                # Get actual values from SQLAlchemy model
+                brand_val = getattr(product, 'brand', None)
+                category_val = getattr(product, 'category', None)
+                title_val = getattr(product, 'title', None)
+                num_ratings_val = getattr(product, 'num_ratings', 0)
+                price_val = getattr(product, 'price', None)
+                
                 # Add brand suggestions
-                if (product.brand.lower() not in seen_suggestions and 
-                    query_lower in product.brand.lower()):
+                if (brand_val and brand_val.lower() not in seen_suggestions and 
+                    query_lower in brand_val.lower()):
                     suggestions.append(AutosuggestItem(
-                        text=product.brand,
+                        text=brand_val,
                         type="brand",
-                        category=product.category.lower(),
-                        popularity=product.num_ratings
+                        category=category_val.lower() if category_val else "general",
+                        popularity=num_ratings_val or 0
                     ))
-                    seen_suggestions.add(product.brand.lower())
+                    seen_suggestions.add(brand_val.lower())
                 
                 # Add category suggestions
-                if (product.category.lower() not in seen_suggestions and
-                    query_lower in product.category.lower()):
+                if (category_val and category_val.lower() not in seen_suggestions and
+                    query_lower in category_val.lower()):
                     suggestions.append(AutosuggestItem(
-                        text=product.category,
+                        text=category_val,
                         type="category", 
-                        category=product.category.lower(),
+                        category=category_val.lower(),
                         popularity=1000  # Default category popularity
                     ))
-                    seen_suggestions.add(product.category.lower())
+                    seen_suggestions.add(category_val.lower())
                 
-                # Add product-based query suggestions
-                title_words = product.title.lower().split()
-                for i in range(len(title_words)):
-                    for j in range(i + 1, min(i + 4, len(title_words) + 1)):
-                        phrase = " ".join(title_words[i:j])
-                        if (len(phrase) > len(query_lower) and 
-                            query_lower in phrase and 
-                            phrase not in seen_suggestions):
-                            suggestions.append(AutosuggestItem(
-                                text=phrase,
-                                type="product",
-                                category=product.category.lower(),
-                                popularity=product.num_ratings
-                            ))
-                            seen_suggestions.add(phrase)
-                            break
+                # Add enhanced product-based query suggestions with price context
+                if title_val:
+                    title_words = title_val.lower().split()
+                    for i in range(len(title_words)):
+                        for j in range(i + 1, min(i + 4, len(title_words) + 1)):
+                            phrase = " ".join(title_words[i:j])
+                            if (len(phrase) > len(query_lower) and 
+                                query_lower in phrase and 
+                                phrase not in seen_suggestions):
+                                
+                                # Enhanced: Add price context to popular categories
+                                enhanced_phrase = phrase
+                                if price_val and category_val:
+                                    if any(cat in category_val.lower() for cat in ['mobile', 'phone']):
+                                        if price_val < 10000:
+                                            enhanced_phrase = f"{phrase} under 10k"
+                                        elif price_val < 20000:
+                                            enhanced_phrase = f"{phrase} under 20k"
+                                    elif any(cat in category_val.lower() for cat in ['laptop', 'computer']):
+                                        if price_val < 50000:
+                                            enhanced_phrase = f"{phrase} under 50k"
+                                
+                                suggestions.append(AutosuggestItem(
+                                    text=enhanced_phrase,
+                                    type="product",
+                                    category=category_val.lower() if category_val else "general",
+                                    popularity=num_ratings_val or 0
+                                ))
+                                seen_suggestions.add(phrase)
+                                break
                 
                 if len(suggestions) >= limit:
                     break

@@ -34,18 +34,9 @@ engine = create_engine(
     pool_pre_ping=True
 )
 
-# For async operations (if needed)
-if settings.DATABASE_URL.startswith("postgresql"):
-    async_engine = create_async_engine(
-        settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
-        echo=settings.DEBUG_MODE
-    )
-    AsyncSessionLocal = sessionmaker(
-        async_engine, class_=AsyncSession, expire_on_commit=False
-    )
-else:
-    async_engine = None
-    AsyncSessionLocal = None
+# For async operations (if needed) - simplified to avoid errors
+async_engine = None
+AsyncSessionLocal = None
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -53,13 +44,29 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 async def init_db():
     """Initialize database tables"""
-    try:
-        # Create tables
-        Base.metadata.create_all(bind=engine)
-        print("✅ Database tables created successfully")
-    except Exception as e:
-        print(f"❌ Error creating database tables: {e}")
-        raise
+    from loguru import logger
+    import time
+    
+    # Retry logic for database connection
+    max_retries = 3
+    retry_delay = 2  # seconds
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Create tables
+            Base.metadata.create_all(bind=engine)
+            logger.info("✅ Database tables created successfully")
+            return
+        except Exception as e:
+            if attempt < max_retries:
+                logger.warning(f"⚠️ Database connection failed (attempt {attempt}/{max_retries}): {e}")
+                logger.info(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                logger.error(f"❌ Failed to connect to database after {max_retries} attempts: {e}")
+                logger.warning("⚠️ Continuing startup with database errors - some features may not work")
+                # Don't raise - allow application to start with limited functionality
 
 
 def get_db():
@@ -71,10 +78,8 @@ def get_db():
         db.close()
 
 
-async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
-    """Get async database session"""
-    if AsyncSessionLocal is None:
-        raise RuntimeError("Async database not configured")
-    
-    async with AsyncSessionLocal() as session:
-        yield session
+async def get_async_db():
+    """
+    Get async database session - currently not supported
+    """
+    raise RuntimeError("Async database operations not configured for SQLite")

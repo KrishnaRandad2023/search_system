@@ -50,6 +50,24 @@ async def lifespan(app: FastAPI):
     """Application lifespan events"""
     logger.info("🚀 Starting Flipkart Search System...")
     
+    # Ensure required directories exist
+    try:
+        import os
+        from pathlib import Path
+        
+        # Create models directory and subdirectories
+        models_dir = Path(os.path.dirname(os.path.dirname(__file__))) / "models"
+        os.makedirs(models_dir, exist_ok=True)
+        
+        # Create data directories
+        data_dir = Path(os.path.dirname(os.path.dirname(__file__))) / "data"
+        os.makedirs(data_dir, exist_ok=True)
+        os.makedirs(data_dir / "raw", exist_ok=True)
+        
+        logger.info("✅ Directory structure verified")
+    except Exception as e:
+        logger.error(f"⚠️ Error creating directories: {e}")
+    
     # Initialize database
     await init_db()
     logger.info("✅ Database initialized")

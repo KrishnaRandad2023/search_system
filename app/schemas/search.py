@@ -44,7 +44,7 @@ class Product(ProductBase):
     updated_at: datetime = Field(..., description="Last update timestamp")
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class SearchResult(BaseModel):
     """Schema for a single search result"""

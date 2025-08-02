@@ -60,19 +60,29 @@ class AdvancedAutosuggestEngine:
         print(f"   - Brand suggestions: {len(self.brand_suggestions):,}")
         
     def _load_prefix_map(self) -> Dict[str, List[str]]:
-        """Load the Amazon Lite prefix map"""
+        """Load the Amazon Lite prefix map (or create empty if missing)"""
         try:
-            with open(self.data_dir / "amazon_lite_prefix_map.json", 'r', encoding='utf-8') as f:
-                return json.load(f)
+            filepath = self.data_dir / "amazon_lite_prefix_map.json"
+            if filepath.exists():
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            else:
+                print("ℹ️  Amazon prefix map not found - using product-based suggestions only")
+                return {}
         except Exception as e:
             print(f"⚠️  Could not load prefix map: {e}")
             return {}
             
     def _load_amazon_suggestions(self) -> List[Dict]:
-        """Load Amazon Lite suggestions"""
+        """Load Amazon Lite suggestions (or create empty if missing)"""
         try:
-            with open(self.data_dir / "amazon_lite_suggestions.json", 'r', encoding='utf-8') as f:
-                return json.load(f)
+            filepath = self.data_dir / "amazon_lite_suggestions.json"
+            if filepath.exists():
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            else:
+                print("ℹ️  Amazon suggestions not found - using product-based suggestions only")
+                return []
         except Exception as e:
             print(f"⚠️  Could not load Amazon suggestions: {e}")
             return []
@@ -107,18 +117,18 @@ class AdvancedAutosuggestEngine:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get popular products (high rating, good stock)
+            # Get popular products (high rating, good stock) - Fixed schema
             cursor.execute("""
-                SELECT title, brand, category, rating, review_count, click_count
+                SELECT title, brand, category, rating, num_ratings, stock_quantity
                 FROM products 
-                WHERE is_in_stock = 1 AND rating >= 3.5
-                ORDER BY (rating * review_count * click_count) DESC
+                WHERE is_available = 1 AND rating >= 3.5
+                ORDER BY (rating * num_ratings * stock_quantity) DESC
                 LIMIT 5000
             """)
             
             products = cursor.fetchall()
             
-            for title, brand, category, rating, review_count, click_count in products:
+            for title, brand, category, rating, num_ratings, stock_quantity in products:
                 # Create suggestions from product title
                 words = re.findall(r'\b\w+\b', title.lower())
                 
@@ -132,11 +142,11 @@ class AdvancedAutosuggestEngine:
                                 "type": "product",
                                 "brand": brand,
                                 "category": category,
-                                "score": float(rating * (review_count + 1) * (click_count + 1)),
+                                "score": float(rating * (num_ratings + 1) * (stock_quantity + 1)),
                                 "metadata": {
                                     "rating": rating,
-                                    "review_count": review_count,
-                                    "click_count": click_count
+                                    "num_ratings": num_ratings,
+                                    "stock_quantity": stock_quantity
                                 }
                             })
                             
@@ -268,9 +278,13 @@ class AdvancedAutosuggestEngine:
         return unique_suggestions[:max_suggestions]
         
     def _get_amazon_suggestions(self, query: str) -> List[SuggestionResult]:
-        """Get suggestions from Amazon Lite model"""
+        """Get suggestions from Amazon Lite model (or empty if not available)"""
         suggestions = []
         
+        # Check if we have prefix map data
+        if not self.prefix_map:
+            return suggestions
+            
         # Check prefix map
         if query in self.prefix_map:
             for suggestion in self.prefix_map[query][:5]:  # Top 5
