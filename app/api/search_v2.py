@@ -319,8 +319,9 @@ def search_products(query: str, category: Optional[str] = None, brand: Optional[
     else:
         query_for_matching = query.lower().strip()
     
-    # Enhanced semantic search mappings for better shoe search
+    # Enhanced semantic search mappings for better category search
     semantic_mappings = {
+        # Shoes/Footwear
         'shoes': ['footwear', 'sneakers', 'loafers', 'boots', 'sandals', 'flip-flops', 'fashion'],
         'shoe': ['footwear', 'sneakers', 'loafers', 'boots', 'sandals', 'flip-flops', 'fashion'],
         'sneakers': ['footwear', 'casual shoes', 'sports shoes', 'running shoes', 'fashion'],
@@ -328,9 +329,17 @@ def search_products(query: str, category: Optional[str] = None, brand: Optional[
         'boots': ['footwear', 'winter boots', 'leather boots', 'fashion'],
         'sandals': ['footwear', 'summer shoes', 'casual shoes', 'fashion'],
         'footwear': ['shoes', 'sneakers', 'loafers', 'boots', 'sandals', 'fashion'],
-        'mobile': ['phone', 'smartphone', 'cell phone'],
-        'laptop': ['computer', 'notebook', 'pc'],
-        'tv': ['television', 'smart tv', 'led tv'],
+        
+        # Electronics - Mobile/Phone
+        'mobile': ['electronics', 'phone', 'smartphone', 'cell phone', 'cellphone'],
+        'smartphone': ['electronics', 'mobile', 'phone', 'cell phone'],
+        'phone': ['electronics', 'mobile', 'smartphone', 'cell phone'],
+        'cellphone': ['electronics', 'mobile', 'smartphone', 'phone'],
+        
+        # Electronics - Other
+        'laptop': ['electronics', 'computer', 'notebook', 'pc'],
+        'computer': ['electronics', 'laptop', 'desktop', 'pc'],
+        'tv': ['electronics', 'television', 'smart tv', 'led tv'],
     }
     
     # Build expanded search terms
@@ -366,8 +375,13 @@ def search_products(query: str, category: Optional[str] = None, brand: Optional[
             
             # Category matching  
             product_category = product.get('category', '').lower()
+            product_subcategory = product.get('subcategory', '').lower()
+            
+            # Check both category and subcategory
             if variant in product_category:
                 variant_score += 0.7
+            if variant in product_subcategory:
+                variant_score += 0.8  # Subcategory is more specific, so higher score
                 
             # Subcategory matching - important for shoes
             product_subcategory = product.get('subcategory', '').lower()
@@ -629,7 +643,7 @@ async def search(
                 smart_service = get_smart_search_service()
                 if smart_service:
                     # Use enhanced smart search with hybrid capabilities
-                    smart_results = smart_service.search_products(
+                    smart_results = await smart_service.search_products(
                         db=db,
                         query=q,
                         page=page,
@@ -650,12 +664,13 @@ async def search(
                 print(f"Smart search failed, falling back to simple search: {e}")
         
         # Fallback to original JSON-based search
-        # Check for spelling corrections - but skip for shoe-related queries to avoid bad corrections
+        # Check for spelling corrections - but skip for shoe/mobile-related queries to avoid bad corrections
         shoe_keywords = ['shoe', 'shoes', 'sneaker', 'sneakers', 'footwear', 'loafer', 'loafers', 'boot', 'boots', 'sandal', 'sandals']
-        is_shoe_query = any(keyword in q.lower() for keyword in shoe_keywords)
+        mobile_keywords = ['mobile', 'phone', 'smartphone', 'cellphone', 'iphone', 'android']
+        skip_spell_check = any(keyword in q.lower() for keyword in shoe_keywords + mobile_keywords)
         
-        if is_shoe_query:
-            # Skip spell correction for shoe queries to avoid "shoes for men" -> "phones top mens" issue
+        if skip_spell_check:
+            # Skip spell correction for shoe/mobile queries to avoid bad corrections
             corrected_query, has_correction = q, False
         else:
             corrected_query, has_correction = check_spelling(q)

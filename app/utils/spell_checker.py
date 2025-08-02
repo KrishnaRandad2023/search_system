@@ -122,24 +122,18 @@ class SpellChecker:
             for word in basic_words:
                 self.spell_checker.create_dictionary_entry(word, 10)
     
-    def check_and_correct(self, query: str, confidence_threshold: int = 5) -> Tuple[str, bool]:
+    def check_and_correct(self, query: str, confidence_threshold: int = 2) -> Tuple[str, bool]:
         """
-        Check spelling and return corrected query if needed
+        Check spelling and return corrected query if needed - Enhanced for universal matching
         
         Args:
             query: The input query to check
-            confidence_threshold: Minimum word frequency to accept correction
+            confidence_threshold: Minimum word frequency to accept correction (lowered for better coverage)
             
         Returns:
             Tuple of (corrected_query, has_correction)
         """
         if not self.is_initialized or not self.spell_checker:
-            return query, False
-        
-        # Disable spell checking for shoe-related queries to prevent incorrect corrections
-        shoe_keywords = ['shoe', 'shoes', 'sneaker', 'sneakers', 'loafer', 'loafers', 'boot', 'boots', 'sandal', 'sandals', 'footwear']
-        query_lower = query.lower()
-        if any(keyword in query_lower for keyword in shoe_keywords):
             return query, False
         
         try:
@@ -153,16 +147,27 @@ class SpellChecker:
                     corrected_words.append(word)
                     continue
                 
-                # Get spell suggestions
+                # Skip common stop words that don't need correction
+                stop_words = {'for', 'men', 'women', 'kids', 'the', 'and', 'with', 'under'}
+                if word in stop_words:
+                    corrected_words.append(word)
+                    continue
+                
+                # Get spell suggestions with more aggressive matching
                 suggestions = self.spell_checker.lookup(word, Verbosity.CLOSEST, max_edit_distance=2)
                 
                 if suggestions and suggestions[0].term != word:
-                    # Only use correction if it's significantly more frequent
+                    # Use more lenient threshold for universal coverage
                     if suggestions[0].count >= confidence_threshold:
                         corrected_words.append(suggestions[0].term)
                         has_correction = True
-                    else:
-                        corrected_words.append(word)
+                        continue
+                
+                # If no good spell correction found, try fuzzy matching with common plurals
+                corrected_word = self._try_fuzzy_correction(word)
+                if corrected_word != word:
+                    corrected_words.append(corrected_word)
+                    has_correction = True
                 else:
                     corrected_words.append(word)
             
@@ -172,6 +177,70 @@ class SpellChecker:
         except Exception as e:
             print(f"Warning: Spell check error: {e}")
             return query, False
+    
+    def _try_fuzzy_correction(self, word: str) -> str:
+        """
+        Try fuzzy corrections for common patterns - Universal product matching
+        
+        Args:
+            word: Word to correct
+            
+        Returns:
+            Corrected word or original if no correction found
+        """
+        # Common typo patterns - universal approach
+        common_corrections = {
+            # Plural/singular corrections
+            'jeins': 'jeans',
+            'jein': 'jean', 
+            'shoen': 'shoe',
+            'sheos': 'shoes',
+            'phoen': 'phone',
+            'lapotop': 'laptop',
+            'labtop': 'laptop',
+            'tshirt': 't-shirt',
+            'tshirts': 't-shirts',
+            
+            # Brand typos
+            'samung': 'samsung',
+            'samsang': 'samsung',
+            'appel': 'apple',
+            'sonny': 'sony',
+            'nokya': 'nokia',
+            
+            # Category typos
+            'moblie': 'mobile',
+            'compuer': 'computer',
+            'electronis': 'electronics',
+            'clothng': 'clothing',
+        }
+        
+        # Direct lookup
+        if word in common_corrections:
+            return common_corrections[word]
+        
+        # Try removing/adding 's' for plurals
+        if word.endswith('s') and len(word) > 4:
+            singular = word[:-1]
+            if self._word_exists_in_vocab(singular):
+                return singular
+        elif not word.endswith('s'):
+            plural = word + 's'
+            if self._word_exists_in_vocab(plural):
+                return word  # Keep original, but mark as valid
+        
+        return word
+    
+    def _word_exists_in_vocab(self, word: str) -> bool:
+        """Check if a word exists in our vocabulary"""
+        if not self.is_initialized or not self.spell_checker:
+            return False
+        try:
+            # Check if word exists with exact match
+            suggestions = self.spell_checker.lookup(word, Verbosity.CLOSEST, max_edit_distance=0)
+            return len(suggestions) > 0 and suggestions[0].term == word
+        except:
+            return False
     
     def get_suggestions(self, word: str, max_suggestions: int = 3) -> List[str]:
         """Get spelling suggestions for a single word"""

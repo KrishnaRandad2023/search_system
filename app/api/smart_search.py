@@ -56,7 +56,7 @@ async def smart_search_products(
     The response includes `query_analysis` showing what was detected from your query.
     """
     try:
-        return search_service.search_products(
+        return await search_service.search_products(
             db=db,
             query=q,
             page=page,
@@ -95,7 +95,7 @@ async def compare_search_methods(
     """
     try:
         # Get smart search results
-        smart_response = search_service.search_products(
+        smart_response = await search_service.search_products(
             db=db, query=q, limit=limit
         )
         
