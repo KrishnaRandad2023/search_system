@@ -12,13 +12,15 @@ from app.db.database import get_db
 from app.db.models import AutosuggestQuery, Product
 from app.schemas.autosuggest import AutosuggestResponse, AutosuggestItem
 from app.config.settings import get_settings
+from app.services.smart_autosuggest_service import get_smart_autosuggest_service, SmartAutosuggestService
 
 router = APIRouter()
 settings = get_settings()
 
 
+# Legacy implementation - kept for backward compatibility
 def get_smart_suggestions(query: str) -> List[AutosuggestItem]:
-    """Generate smart contextual suggestions based on query patterns"""
+    """Generate smart contextual suggestions based on query patterns (LEGACY)"""
     suggestions = []
     query_lower = query.lower().strip()
     
@@ -84,17 +86,20 @@ async def get_autosuggest(
     q: str = Query(..., description="Search query prefix", min_length=1),
     limit: int = Query(default=10, description="Maximum number of suggestions", le=50),
     category: Optional[str] = Query(default=None, description="Filter by category"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    smart_service: SmartAutosuggestService = Depends(get_smart_autosuggest_service)
 ):
     """
     Get autosuggest suggestions for a given query prefix
     
     Features:
+    - NLP-based query understanding
     - Prefix matching on popular queries
     - Category filtering
     - Popularity-based ranking
     - Product title suggestions
     - Price-range aware suggestions (e.g., "mobile under 10k", "laptop under 50000")
+    - Entity extraction for brands, categories, and price ranges
     """
     try:
         suggestions = []
@@ -108,42 +113,21 @@ async def get_autosuggest(
                 response_time_ms=0
             )
 
-        # Add smart contextual suggestions first (highest priority)
-        smart_suggestions = get_smart_suggestions(q)
+        # Use our new intelligent query analyzer for smarter suggestions
+        smart_suggestions = smart_service.get_smart_suggestions(db, q)
         suggestions.extend(smart_suggestions)
-
-        # Enhanced: Add price-range suggestions for common queries
-        price_suggestions = []
-        if any(word in query_lower for word in ['mobile', 'phone', 'smartphone']):
-            price_ranges = [
-                "mobile under 10k", "mobile under 15k", "mobile under 20k", 
-                "mobile under 30k", "mobile under 50k"
-            ]
-            for price_query in price_ranges:
-                if query_lower in price_query and price_query not in [s.text.lower() for s in suggestions]:
-                    price_suggestions.append(AutosuggestItem(
-                        text=price_query,
-                        type="price_range",
-                        category="electronics",
-                        popularity=5000
-                    ))
         
-        if any(word in query_lower for word in ['laptop', 'computer']):
-            price_ranges = [
-                "laptop under 30k", "laptop under 50k", "laptop under 70k", 
-                "laptop under 1 lakh", "gaming laptop under 80k"
-            ]
-            for price_query in price_ranges:
-                if query_lower in price_query and price_query not in [s.text.lower() for s in suggestions]:
-                    price_suggestions.append(AutosuggestItem(
-                        text=price_query,
-                        type="price_range", 
-                        category="electronics",
-                        popularity=4000
-                    ))
-
-        # Add price suggestions to main suggestions
-        suggestions.extend(price_suggestions[:2])  # Limit to top 2 price suggestions
+        # Fallback to legacy approach if smart service didn't return enough suggestions
+        if len(smart_suggestions) < 3:
+            # Add legacy smart contextual suggestions as backup
+            legacy_suggestions = get_smart_suggestions(q)
+            
+            # Only add suggestions that aren't already in the list
+            existing_texts = {s.text.lower() for s in suggestions}
+            for suggestion in legacy_suggestions:
+                if suggestion.text.lower() not in existing_texts:
+                    suggestions.append(suggestion)
+                    existing_texts.add(suggestion.text.lower())
         
         # Method 1: Search in autosuggest queries table (SAFE: only select existing columns)
         autosuggest_query = db.query(

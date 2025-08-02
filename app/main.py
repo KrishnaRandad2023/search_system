@@ -12,7 +12,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from loguru import logger
 
-from app.api import autosuggest, search, health, analytics, feedback, database_admin, system_demo
+from app.api import autosuggest, search, health, analytics, feedback, database_admin, system_demo, search_insights, autosuggest_feedback, smart_search
 try:
     from app.api import direct_search
     DIRECT_SEARCH_AVAILABLE = True
@@ -364,7 +364,10 @@ async def api_info():
 # Include API routers
 app.include_router(health.router, prefix="/health", tags=["Health"])
 app.include_router(autosuggest.router, prefix="/autosuggest", tags=["Autosuggest"])
+app.include_router(autosuggest_feedback.router, prefix="/autosuggest/feedback", tags=["Autosuggest Feedback"])
 app.include_router(search.router, prefix="/search", tags=["Search"])
+app.include_router(smart_search.router, prefix="/search", tags=["Smart Search"])
+app.include_router(search_insights.router, prefix="/search-insights", tags=["Search Insights"])
 if SEARCH_V2_AVAILABLE:
     app.include_router(search_v2.router, tags=["Search v2"])  # Frontend search API 
     app.include_router(search_v2.v1_router, tags=["Search v2 Analytics"])  # v1 compatibility for tracking

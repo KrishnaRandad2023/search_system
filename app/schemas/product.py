@@ -66,30 +66,45 @@ class SearchResponse(BaseModel):
     has_typo_correction: bool = Field(False, description="Whether spelling correction was applied")
     corrected_query: Optional[str] = Field(None, description="Spell-corrected query if correction was applied")
     filters_applied: Optional[Dict[str, Any]] = Field(None, description="Applied filters")
+    query_analysis: Optional[Dict[str, Any]] = Field(None, description="NLP analysis of the search query")
     
     class Config:
         json_schema_extra = {
             "example": {
-                "query": "samsung mobile",
+                "query": "samsung mobile under 15k",
                 "products": [
                     {
                         "product_id": "FLP12345678",
-                        "title": "Samsung Galaxy S23 Ultra (12GB RAM, 256GB)",
+                        "title": "Samsung Galaxy M34 (6GB RAM, 128GB)",
                         "category": "Electronics",
                         "brand": "Samsung",
-                        "price": 89999.0,
-                        "rating": 4.5,
-                        "stock": 45
+                        "price": 14999.0,
+                        "rating": 4.3,
+                        "stock": 25
                     }
                 ],
-                "total_count": 156,
+                "total_count": 42,
                 "page": 1,
                 "limit": 20,
-                "total_pages": 8,
-                "response_time_ms": 123.45,
+                "total_pages": 3,
+                "response_time_ms": 87.23,
                 "filters_applied": {
-                    "category": "Electronics",
-                    "brand": "Samsung"
+                    "category": "mobile",
+                    "brand": "samsung",
+                    "max_price": 15000,
+                    "extracted_from_query": {
+                        "price_range": {"min": None, "max": 15000},
+                        "brands": ["samsung"],
+                        "categories": ["mobile"]
+                    }
+                },
+                "query_analysis": {
+                    "query_type": "brand_category",
+                    "sentiment": "neutral",
+                    "brands_detected": ["samsung"],
+                    "categories_detected": ["mobile"],
+                    "price_range_detected": [None, 15000],
+                    "modifiers": []
                 }
             }
         }
