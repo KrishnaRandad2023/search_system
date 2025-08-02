@@ -108,19 +108,23 @@ class SpellChecker:
             
             # Add words to spell checker
             added_count = 0
-            for word, count in word_counts.items():
-                if count >= 2:  # Lower threshold since we have more data
-                    self.spell_checker.create_dictionary_entry(word, count)
-                    added_count += 1
-            
-            print(f"📚 Spell checker vocabulary built with {added_count} words from full dataset")
+            if self.spell_checker is not None:
+                for word, count in word_counts.items():
+                    if count >= 2:  # Lower threshold since we have more data
+                        self.spell_checker.create_dictionary_entry(word, count)
+                        added_count += 1
+                
+                print(f"📚 Spell checker vocabulary built with {added_count} words from full dataset")
+            else:
+                print("⚠️ Spell checker not initialized, skipping vocabulary build")
             
         except Exception as e:
             print(f"⚠️ Warning: Could not build spell check vocabulary: {e}")
             # Add basic fallback vocabulary
-            basic_words = ['phone', 'mobile', 'laptop', 'computer', 'shoes', 'shirt', 'jeans']
-            for word in basic_words:
-                self.spell_checker.create_dictionary_entry(word, 10)
+            if self.spell_checker is not None:
+                basic_words = ['phone', 'mobile', 'laptop', 'computer', 'shoes', 'shirt', 'jeans']
+                for word in basic_words:
+                    self.spell_checker.create_dictionary_entry(word, 10)
     
     def check_and_correct(self, query: str, confidence_threshold: int = 2) -> Tuple[str, bool]:
         """
