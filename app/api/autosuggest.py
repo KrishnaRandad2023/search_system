@@ -168,7 +168,7 @@ async def get_autosuggest(
                     Product.brand.ilike(f"%{query_lower}%"),
                     Product.category.ilike(f"%{query_lower}%")
                 ),
-                Product.is_available == True  # Enhanced: use correct column
+                Product.is_in_stock == True  # Enhanced: use correct column
             )
             
             if category:

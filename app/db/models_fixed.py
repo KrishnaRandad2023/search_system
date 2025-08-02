@@ -15,84 +15,58 @@ Base = declarative_base()
 class Product(Base):
     __tablename__ = "products"
     
-    # Primary key and basic info
-    id = Column(Integer, primary_key=True, index=True)
-    product_id = Column(String(50), index=True)
+    id = Column(String(50), primary_key=True, index=True)
     title = Column(Text, nullable=False, index=True)
-    description = Column(Text)
+    brand = Column(Text, index=True)
     category = Column(Text, nullable=False, index=True)
     subcategory = Column(Text, index=True)
-    brand = Column(Text, index=True)
     specifications = Column(Text)
+    description = Column(Text)
     
     # Pricing - Match actual DB schema
+    price = Column(Float, nullable=False, index=True)
     original_price = Column(Float)
-    current_price = Column(Float, nullable=False, index=True)
-    discount_percent = Column(Float)
-    savings = Column(Float)
+    discount_percentage = Column(Integer)
     
     # Ratings and Reviews - Match actual DB schema
     rating = Column(Float, index=True)
-    num_ratings = Column(Integer, default=0)  # This is the actual column in DB
+    review_count = Column(Integer, default=0)
     
     # Inventory - Match actual DB schema
     stock_quantity = Column(Integer, default=0)
-    is_available = Column(Boolean, default=True, index=True)
+    is_in_stock = Column(Boolean, default=True, index=True)
     
     # Seller information
     seller_name = Column(Text)
     seller_rating = Column(Float)
-    seller_location = Column(Text)
     
-    # Product details
-    return_policy = Column(Text)
-    exchange_available = Column(Boolean)
-    cod_available = Column(Boolean)
-    images = Column(Text)
+    # Additional fields from actual DB schema
+    image_urls = Column(Text)
+    is_flipkart_assured = Column(Boolean, default=False)
+    is_plus_product = Column(Boolean, default=False)
+    delivery_days = Column(Integer, default=5)
     tags = Column(Text)
+    color = Column(Text)
+    size = Column(Text)
+    weight = Column(Text)
+    dimensions = Column(Text)
+    warranty = Column(Text)
+    return_policy = Column(Text)
+    
+    # Analytics fields
+    ctr = Column(Float, default=0.0)
+    conversion_rate = Column(Float, default=0.0)
+    click_count = Column(Integer, default=0)
+    order_count = Column(Integer, default=0)
+    view_count = Column(Integer, default=0)
+    wishlist_count = Column(Integer, default=0)
     
     # Timestamps
     created_at = Column(DateTime, default=func.now())
-    last_updated = Column(DateTime, default=func.now(), onupdate=func.now())
-    
-    # Analytics
-    views = Column(Integer, default=0)
-    purchases = Column(Integer, default=0)
-    
-    # Features
-    is_featured = Column(Boolean, default=False)  # Actual DB column
-    is_bestseller = Column(Boolean, default=False)  # Actual DB column
-    delivery_days = Column(Integer, default=5)
-    free_delivery = Column(Boolean, default=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     def __repr__(self):
-        return f"<Product(id={self.id}, product_id={self.product_id}, title='{self.title[:50]}...')>"
-    
-    # For backward compatibility with other parts of the code
-    @property
-    def price(self):
-        """Alias for current_price to maintain compatibility"""
-        return self.current_price
-    
-    @property
-    def image_urls(self):
-        """Alias for images to maintain compatibility"""
-        return self.images
-    
-    @property
-    def is_in_stock(self):
-        """Alias for is_available to maintain compatibility"""
-        return self.is_available
-    
-    @property
-    def review_count(self):
-        """Alias for num_ratings to maintain compatibility"""
-        return self.num_ratings
-    
-    @property
-    def updated_at(self):
-        """Alias for last_updated to maintain compatibility"""
-        return self.last_updated
+        return f"<Product(id={self.id}, title='{self.title[:50]}...')>"
 
 
 class AutosuggestQuery(Base):
@@ -105,6 +79,7 @@ class AutosuggestQuery(Base):
     
     def __repr__(self):
         return f"<AutosuggestQuery(query='{self.query}', popularity={self.popularity})>"
+
 
 class Review(Base):
     __tablename__ = "reviews"

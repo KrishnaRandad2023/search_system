@@ -251,7 +251,7 @@ async def get_system_metrics(db: Session = Depends(get_db)):
         total_products = db.query(Product).count()
         
         # Available products
-        available_products = db.query(Product).filter(Product.is_available == True).count()
+        available_products = db.query(Product).filter(Product.is_in_stock == True).count()
         
         # Categories count
         categories_count = db.query(func.count(func.distinct(Product.category))).scalar() or 0

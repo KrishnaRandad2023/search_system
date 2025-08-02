@@ -68,13 +68,24 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### Step 4: Run the Application
+### Step 4: Generate Product Database ⚠️ **CRITICAL**
+
+```bash
+# IMPORTANT: Generate product data (this creates 12,000+ products)
+python scripts/generate_flipkart_products.py
+
+# Verify database was created (database will be in data/db/ folder)
+python -c "import os; print('Database exists (data/db):', os.path.exists('data/db/flipkart_products.db'))"
+# Should show: Database exists (data/db): True
+```
+
+### Step 5: Run the Application
 
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Step 5: Open in Browser
+### Step 6: Open in Browser
 
 ```
 Backend API: http://localhost:8000
@@ -195,15 +206,51 @@ pip list
 # Should see: fastapi, uvicorn, sqlalchemy, etc.
 ```
 
-### 5. Database Setup
+### 5. Database Setup & Product Data Loading ⚠️ **CRITICAL STEP**
 
 ```bash
-# The app will create SQLite database automatically
-# No additional setup needed for basic functionality
+# Check if database exists (will show False initially)
+python -c "import os; print('Database exists (root):', os.path.exists('flipkart_search.db')); print('Database exists (data/db):', os.path.exists('data/db/flipkart_products.db'))"
 
-# Optional: Check if database exists
-python -c "import os; print('Database exists:', os.path.exists('flipkart_search.db'))"
+# Generate and populate database with 10,000+ products
+python scripts/generate_flipkart_products.py
+
+# Verify database was created successfully
+python -c "import os; print('Database exists (root):', os.path.exists('flipkart_search.db')); print('Database exists (data/db):', os.path.exists('data/db/flipkart_products.db'))"
+# Should now show: Database exists (data/db): True
+
+# Check product count and verify data
+python -c "
+import sqlite3
+import os
+db_paths = ['flipkart_search.db', 'data/db/flipkart_products.db', 'data/flipkart_products.db']
+for db_path in db_paths:
+    if os.path.exists(db_path):
+        print(f'Found database: {db_path}')
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM products')
+        count = cursor.fetchone()[0]
+        print(f'Products in {db_path}: {count}')
+        conn.close()
+        break
+else:
+    print('No database found!')
+"
 ```
+
+**🎯 Without this step, you'll see:**
+
+- ❌ Autosuggest works but no search results
+- ❌ Empty product database
+- ❌ API returns no products
+
+**✅ After this step, you'll have:**
+
+- ✅ 12,000+ realistic Flipkart products
+- ✅ Categories: Electronics, Fashion, Home & Kitchen, Books, Sports, Beauty, Grocery, Toys & Baby
+- ✅ Full search functionality with real data
+- ✅ Database location: `data/db/flipkart_products.db`
 
 ---
 
@@ -307,6 +354,39 @@ curl "http://localhost:8000/api/search?query=mobile"
 curl "http://localhost:8000/api/autosuggest?query=mob"
 
 # Should return JSON with suggestions
+```
+
+### 5. Verify Database & Products
+
+```bash
+# Check if database has products (checks multiple possible locations)
+python -c "
+import sqlite3
+import os
+db_paths = ['flipkart_search.db', 'data/db/flipkart_products.db', 'data/flipkart_products.db']
+for db_path in db_paths:
+    if os.path.exists(db_path):
+        print(f'Found database: {db_path}')
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM products')
+        count = cursor.fetchone()[0]
+        print(f'Products in database: {count}')
+
+        # Show sample products
+        cursor.execute('SELECT title, category, current_price FROM products LIMIT 3')
+        products = cursor.fetchall()
+        print('Sample products:')
+        for product in products:
+            print(f'  - {product[0]} ({product[1]}) - ₹{product[2]}')
+
+        conn.close()
+        break
+else:
+    print('❌ No database found! Run: python scripts/generate_flipkart_products.py')
+"
+
+# Should show: Products in database: 12000+ (or similar number)
 ```
 
 ---
@@ -574,6 +654,21 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### Problem: "ModuleNotFoundError: No module named 'faker'"
+
+**Solution:**
+
+```bash
+# Install faker specifically (it was missing from requirements.txt)
+pip install faker>=20.1.0
+
+# Or reinstall all requirements (faker is now included)
+pip install -r requirements.txt
+
+# Then try running the database generation again
+python scripts/generate_flipkart_products.py
+```
+
 ### Problem: "Port 8000 already in use"
 
 **Solution:**
@@ -634,15 +729,42 @@ ls app/
 # Should show: __init__.py, main.py, api/, etc.
 ```
 
-### Issue 3: Database Errors
+### Issue 3: Database Errors / No Search Results
+
+**Problem**: Autosuggest works but no search results, or database schema errors like "no such column: products.product_id"
+
+**Solution:**
 
 ```bash
-# Delete existing database and let app recreate it
-rm flipkart_search.db search_system.db  # macOS/Linux
-del flipkart_search.db search_system.db  # Windows
+# Step 1: Check if you have the schema mismatch issue
+# If you see errors like "no such column: products.product_id", you have a schema mismatch
 
-# Restart the application
+# Step 2: Verify database exists and has products
+python -c "
+import sqlite3
+conn = sqlite3.connect('data/db/flipkart_products.db')
+cursor = conn.cursor()
+cursor.execute('SELECT COUNT(*) FROM products')
+count = cursor.fetchone()[0]
+print(f'Products in database: {count}')
+conn.close()
+"
+
+# Step 3: If schema mismatch occurred, restart the server
+# The models have been fixed to match the actual database schema
+# Stop server (Ctrl+C) and restart:
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Step 4: Test search functionality
+curl "http://localhost:8000/api/search?query=shirt"
+# Should now return actual products!
 ```
+
+**Common Schema Issues:**
+
+- ❌ `product_id` column not found → Fixed: Model now matches actual DB schema
+- ❌ `current_price` vs `price` → Fixed: Using `price` column name
+- ❌ `is_available` vs `is_in_stock` → Fixed: Using `is_in_stock` column name
 
 ### Issue 4: Redis Connection Errors (Optional)
 

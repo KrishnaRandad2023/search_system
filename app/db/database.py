@@ -22,7 +22,19 @@ def get_db_url() -> str:
     # Ensure data directory exists for SQLite
     if db_url.startswith("sqlite"):
         db_path = db_url.replace("sqlite:///", "")
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        # Handle ./ prefix which refers to project root
+        if db_path.startswith("./"):
+            db_path = db_path[2:]  # Remove ./ prefix
+            
+        # Create parent directories if they don't exist
+        parent_dir = Path(db_path).parent
+        if parent_dir.name:  # Skip if it's the current directory
+            parent_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Log the actual path being used
+        from loguru import logger
+        abs_path = Path(db_path).resolve().absolute()
+        logger.info(f"Using database at: {abs_path}")
     
     return db_url
 

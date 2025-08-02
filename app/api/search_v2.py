@@ -109,63 +109,67 @@ def get_smart_search_service() -> SmartSearchService:
 PRODUCTS_DATA = []
 
 def load_product_data():
-    """Load product data from JSON file and database"""
+    """Load product data from our working database"""
     global PRODUCTS_DATA
     if PRODUCTS_DATA:  # Already loaded
         return PRODUCTS_DATA
         
     try:
-        # First try to load from database (which has our 17K products)
-        from app.db.database import get_db
-        from app.db.models import Product
-        from sqlalchemy.orm import Session
+        # Use direct SQLite connection to our working database
+        import sqlite3
         
-        # Get database session
-        db_gen = get_db()
-        db = next(db_gen)
+        # Connect to the correct database file
+        conn = sqlite3.connect("flipkart_search.db")
+        cursor = conn.cursor()
         
-        # Query all products from database
-        products = db.query(Product).filter(Product.is_available == True).all()
+        # Query all available products
+        cursor.execute("""
+            SELECT id, product_id, title, description, category, subcategory, brand,
+                   current_price, original_price, discount_percent, rating, num_ratings,
+                   is_available, specifications, images, tags
+            FROM products 
+            WHERE is_available = 1
+        """)
+        
+        results = cursor.fetchall()
         
         # Convert to dict format
-        for product in products:
-            tags = getattr(product, 'tags', None)
-            features = tags.split(',') if tags and tags.strip() else []
+        columns = ['id', 'product_id', 'title', 'description', 'category', 'subcategory', 
+                  'brand', 'current_price', 'original_price', 'discount_percent', 
+                  'rating', 'num_ratings', 'is_available', 'specifications', 'images', 'tags']
+        
+        for row in results:
+            product_data = dict(zip(columns, row))
+            
+            # Parse tags into features
+            tags = product_data.get('tags', '') or ''
+            features = tags.split(',') if tags.strip() else []
             
             product_dict = {
-                'id': product.product_id,
-                'title': product.title,
-                'description': product.description or '',
-                'category': product.category,
-                'subcategory': product.subcategory or '',
-                'brand': product.brand,
-                'current_price': product.current_price,
-                'original_price': product.original_price,
-                'discount_percent': product.discount_percent,
-                'rating': product.rating,
-                'num_ratings': product.num_ratings,
-                'is_available': product.is_available,
-                'specifications': product.specifications or '{}',
+                'id': product_data['product_id'],
+                'title': product_data['title'],
+                'description': product_data['description'] or '',
+                'category': product_data['category'],
+                'subcategory': product_data['subcategory'] or '',
+                'brand': product_data['brand'],
+                'current_price': product_data['current_price'],
+                'original_price': product_data['original_price'],
+                'discount_percent': product_data['discount_percent'],
+                'rating': product_data['rating'],
+                'num_ratings': product_data['num_ratings'],
+                'is_available': product_data['is_available'],
+                'specifications': product_data['specifications'] or '{}',
                 'features': features,
-                'image_url': product.images
+                'image_url': product_data['images']
             }
             PRODUCTS_DATA.append(product_dict)
         
-        db.close()
-        print(f"Loaded {len(PRODUCTS_DATA)} products from database for search v2")
+        conn.close()
+        print(f"✅ Loaded {len(PRODUCTS_DATA)} products from flipkart_search.db for search v2")
         
     except Exception as e:
-        print(f"Error loading from database: {e}")
-        # Fallback to JSON file
-        try:
-            json_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw", "products.json")
-            if os.path.exists(json_path):
-                with open(json_path, 'r', encoding='utf-8') as f:
-                    PRODUCTS_DATA = json.load(f)[:1000]  # Limit for demo
-                    print(f"Loaded {len(PRODUCTS_DATA)} products from JSON for search v2")
-        except Exception as e2:
-            print(f"Error loading product data from JSON: {e2}")
-            PRODUCTS_DATA = []
+        print(f"❌ Error loading from database: {e}")
+        PRODUCTS_DATA = []
     
     return PRODUCTS_DATA
 
@@ -637,33 +641,33 @@ async def search(
     start_time = time.time()
     
     try:
-        # Try to use enhanced smart search service first
-        if SMART_SEARCH_AVAILABLE and use_hybrid:
-            try:
-                smart_service = get_smart_search_service()
-                if smart_service:
-                    # Use enhanced smart search with hybrid capabilities
-                    smart_results = await smart_service.search_products(
-                        db=db,
-                        query=q,
-                        page=page,
-                        limit=per_page,
-                        category=category,
-                        brand=brand,
-                        min_price=min_price,
-                        max_price=max_price,
-                        min_rating=min_rating,
-                        sort_by=sort_by,
-                        use_hybrid_enhancement=True
-                    )
-                    
-                    # Convert to frontend format
-                    return _convert_smart_response_to_v2(smart_results, start_time)
-                    
-            except Exception as e:
-                print(f"Smart search failed, falling back to simple search: {e}")
+        # Disable smart search temporarily to use reliable fallback
+        # if SMART_SEARCH_AVAILABLE and use_hybrid:
+        #     try:
+        #         smart_service = get_smart_search_service()
+        #         if smart_service:
+        #             # Use enhanced smart search with hybrid capabilities
+        #             smart_results = await smart_service.search_products(
+        #                 db=db,
+        #                 query=q,
+        #                 page=page,
+        #                 limit=per_page,
+        #                 category=category,
+        #                 brand=brand,
+        #                 min_price=min_price,
+        #                 max_price=max_price,
+        #                 min_rating=min_rating,
+        #                 sort_by=sort_by,
+        #                 use_hybrid_enhancement=True
+        #             )
+        #             
+        #             # Convert to frontend format
+        #             return _convert_smart_response_to_v2(smart_results, start_time)
+        #             
+        #     except Exception as e:
+        #         print(f"Smart search failed, falling back to simple search: {e}")
         
-        # Fallback to original JSON-based search
+        # Use fallback search that works with our database
         # Check for spelling corrections - but skip for shoe/mobile-related queries to avoid bad corrections
         shoe_keywords = ['shoe', 'shoes', 'sneaker', 'sneakers', 'footwear', 'loafer', 'loafers', 'boot', 'boots', 'sandal', 'sandals']
         mobile_keywords = ['mobile', 'phone', 'smartphone', 'cellphone', 'iphone', 'android']

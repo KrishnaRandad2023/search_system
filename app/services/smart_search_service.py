@@ -445,7 +445,7 @@ class SmartSearchService:
             logger.info(f"Query analysis: {analysis}")
             
             # Build SQL query with enhanced universal matching
-            query_obj = db.query(Product).filter(Product.is_available == filters.get('in_stock', True))
+            query_obj = db.query(Product).filter(Product.is_in_stock == filters.get('in_stock', True))
             
             # Enhanced search logic - Universal intelligent matching
             search_terms = self._extract_intelligent_search_terms(query, analysis)
@@ -606,7 +606,7 @@ class SmartSearchService:
                     Product.subcategory.ilike(f'%{query}%'),
                     Product.brand.ilike(f'%{query}%')
                 ),
-                Product.is_available == filters.get('in_stock', True)
+                Product.is_in_stock == filters.get('in_stock', True)
             ).order_by(Product.rating.desc()).limit(limit)
             
             products = query_obj.all()
@@ -1181,7 +1181,7 @@ class SmartSearchService:
     
     def _build_smart_search_query(self, db: Session, analysis, query: str, in_stock: bool):
         """Build search query based on NLP analysis"""
-        base_query = db.query(Product).filter(Product.is_available == True)
+        base_query = db.query(Product).filter(Product.is_in_stock == True)
         
         if in_stock:
             base_query = base_query.filter(Product.stock_quantity > 0)
@@ -1288,28 +1288,25 @@ class SmartSearchService:
         elif sort_by == "rating":
             return query.order_by(Product.rating.desc(), Product.num_ratings.desc())
         elif sort_by == "popularity":
-            return query.order_by(Product.num_ratings.desc(), Product.rating.desc())
+            return query.order_by(Product.review_count.desc(), Product.rating.desc())
         else:  # relevance with sentiment analysis
             if analysis.sentiment == "positive":
                 # For positive sentiment (best, top), prioritize high ratings
                 return query.order_by(
                     Product.rating.desc(),
-                    Product.is_bestseller.desc(),
-                    Product.num_ratings.desc()
+                    Product.review_count.desc()
                 )
             elif analysis.sentiment == "negative" or "budget" in analysis.modifiers:
                 # For budget queries, prioritize price
                 return query.order_by(
-                    Product.current_price.asc(),
+                    Product.price.asc(),
                     Product.rating.desc()
                 )
             else:
                 # Default relevance
                 return query.order_by(
-                    Product.is_bestseller.desc(),
-                    Product.is_featured.desc(),
                     Product.rating.desc(),
-                    Product.num_ratings.desc()
+                    Product.review_count.desc()
                 )
     
     def _apply_ml_ranking(self, products, query: str):

@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class DirectSearchService:
     """Direct database search service bypassing SQLAlchemy"""
     
-    def __init__(self, db_path: str = "data/flipkart_products.db"):
+    def __init__(self, db_path: str = "flipkart_search.db"):
         self.db_path = Path(db_path)
         if not self.db_path.exists():
             raise FileNotFoundError(f"Database not found: {db_path}")

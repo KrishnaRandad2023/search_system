@@ -12,7 +12,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from loguru import logger
 
-from app.api import autosuggest, search, health, analytics, feedback, database_admin, system_demo, search_insights, autosuggest_feedback, smart_search
+from app.api import autosuggest, search, health, analytics, feedback, database_admin, system_demo, search_insights, autosuggest_feedback, smart_search, simple_search
 try:
     from app.api import hybrid_api
     HYBRID_API_AVAILABLE = True
@@ -441,6 +441,7 @@ app.include_router(autosuggest.router, prefix="/autosuggest", tags=["Autosuggest
 app.include_router(autosuggest_feedback.router, prefix="/autosuggest/feedback", tags=["Autosuggest Feedback"])
 app.include_router(search.router, prefix="/search", tags=["Search"])
 app.include_router(smart_search.router, prefix="/search", tags=["Smart Search"])
+app.include_router(simple_search.router, tags=["Simple Search"])  # Debug search endpoint
 if HYBRID_API_AVAILABLE:
     app.include_router(hybrid_api.router, tags=["Hybrid ML Search"])
 app.include_router(search_insights.router, prefix="/search-insights", tags=["Search Insights"])

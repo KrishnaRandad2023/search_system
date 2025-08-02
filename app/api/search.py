@@ -141,7 +141,7 @@ async def search_products(
                     semantic_search_terms.add(" ".join(query_words[i:j]))
         
         # Build base query - Enhanced to use correct schema
-        base_query = db.query(Product).filter(Product.is_available == True)
+        base_query = db.query(Product).filter(Product.is_in_stock == True)
         
         # Add stock filter - Enhanced to use correct column
         if in_stock:
@@ -210,8 +210,8 @@ async def search_products(
             # Enhanced relevance scoring with semantic intelligence
             # Use simple but effective relevance scoring
             search_query = search_query.order_by(
-                Product.is_bestseller.desc(),
-                Product.is_featured.desc(),
+                # Sort by relevance and rating
+                Product.rating.desc(),
                 Product.rating.desc(),
                 Product.num_ratings.desc(),
                 Product.current_price.asc()  # Lower price as tie breaker

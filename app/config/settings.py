@@ -18,10 +18,10 @@ class Settings(BaseSettings):
     DEBUG_MODE: bool = Field(default=True, description="Debug mode")
     WORKERS: int = Field(default=4, description="Number of workers")
     
-    # Database Configuration - Fixed to use correct database file
+    # Database Configuration - Using absolute path to ensure correct file is used
     DATABASE_URL: str = Field(
-        default="sqlite:///./data/flipkart_products.db",
-        description="Database URL"
+        default="sqlite:///D:/Flipkart grid/New Grid/flipkart_search.db",
+        description="Database URL for SQLite database with absolute path"
     )
     TEST_DATABASE_URL: str = Field(
         default="sqlite:///./data/db/test.db",
