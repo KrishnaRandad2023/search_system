@@ -82,9 +82,8 @@ class AutosuggestQuery(Base):
     popularity = Column(Integer, default=0, index=True)
     category = Column(String(100), index=True)
     
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    # Note: No timestamp columns in current DB schema
+    # These can be added with a migration if needed
     
     def __repr__(self):
         return f"<AutosuggestQuery(query='{self.query}', popularity={self.popularity})>"

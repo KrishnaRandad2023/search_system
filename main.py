@@ -51,6 +51,14 @@ except ImportError:
     analytics_router = None
 
 try:
+    from app.api.hybrid_search import router as hybrid_router
+except ImportError:
+    hybrid_router = None
+except Exception as e:
+    print(f"Warning: Could not load hybrid_search router: {e}")
+    hybrid_router = None
+
+try:
     from app.search.hybrid_engine import HybridSearchEngine
 except ImportError:
     HybridSearchEngine = None
@@ -131,6 +139,8 @@ if search_v1_router:
     app.include_router(search_v1_router)
 if analytics_router:
     app.include_router(analytics_router)
+if hybrid_router:
+    app.include_router(hybrid_router)
 
 # Startup event
 @app.on_event("startup")
