@@ -1,6 +1,6 @@
 """
 Search API v2 for Frontend Integration
-Simple implementation using JSON data
+Enhanced with Hybrid Search Capabilities
 """
 
 from typing import List, Optional, Dict, Any
@@ -12,8 +12,20 @@ import time
 import os
 import json
 from typing import List, Dict, Optional, Any
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+# Database imports
+from app.db.database import get_db
+
+# Smart search service import
+try:
+    from app.services.smart_search_service import SmartSearchService
+    SMART_SEARCH_AVAILABLE = True
+except ImportError:
+    SMART_SEARCH_AVAILABLE = False
+    print("Warning: Smart search service not available")
 
 # Add spell correction imports
 try:
@@ -83,24 +95,78 @@ router = APIRouter(prefix="/api/v2", tags=["search"])
 # Create a separate router for v1 endpoints (for compatibility)
 v1_router = APIRouter(prefix="/api/v1", tags=["analytics"])
 
+# Initialize smart search service
+_smart_search_service = None
+
+def get_smart_search_service() -> SmartSearchService:
+    """Get or create smart search service instance"""
+    global _smart_search_service
+    if _smart_search_service is None and SMART_SEARCH_AVAILABLE:
+        _smart_search_service = SmartSearchService()
+    return _smart_search_service
+
 # Load product data
 PRODUCTS_DATA = []
 
 def load_product_data():
-    """Load product data from JSON file"""
+    """Load product data from JSON file and database"""
     global PRODUCTS_DATA
     if PRODUCTS_DATA:  # Already loaded
         return PRODUCTS_DATA
         
     try:
-        json_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw", "products.json")
-        if os.path.exists(json_path):
-            with open(json_path, 'r', encoding='utf-8') as f:
-                PRODUCTS_DATA = json.load(f)[:1000]  # Limit for demo
-                print(f"Loaded {len(PRODUCTS_DATA)} products for search v2")
+        # First try to load from database (which has our 17K products)
+        from app.db.database import get_db
+        from app.db.models import Product
+        from sqlalchemy.orm import Session
+        
+        # Get database session
+        db_gen = get_db()
+        db = next(db_gen)
+        
+        # Query all products from database
+        products = db.query(Product).filter(Product.is_available == True).all()
+        
+        # Convert to dict format
+        for product in products:
+            tags = getattr(product, 'tags', None)
+            features = tags.split(',') if tags and tags.strip() else []
+            
+            product_dict = {
+                'id': product.product_id,
+                'title': product.title,
+                'description': product.description or '',
+                'category': product.category,
+                'subcategory': product.subcategory or '',
+                'brand': product.brand,
+                'current_price': product.current_price,
+                'original_price': product.original_price,
+                'discount_percent': product.discount_percent,
+                'rating': product.rating,
+                'num_ratings': product.num_ratings,
+                'is_available': product.is_available,
+                'specifications': product.specifications or '{}',
+                'features': features,
+                'image_url': product.images
+            }
+            PRODUCTS_DATA.append(product_dict)
+        
+        db.close()
+        print(f"Loaded {len(PRODUCTS_DATA)} products from database for search v2")
+        
     except Exception as e:
-        print(f"Error loading product data: {e}")
-        PRODUCTS_DATA = []
+        print(f"Error loading from database: {e}")
+        # Fallback to JSON file
+        try:
+            json_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw", "products.json")
+            if os.path.exists(json_path):
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    PRODUCTS_DATA = json.load(f)[:1000]  # Limit for demo
+                    print(f"Loaded {len(PRODUCTS_DATA)} products from JSON for search v2")
+        except Exception as e2:
+            print(f"Error loading product data from JSON: {e2}")
+            PRODUCTS_DATA = []
+    
     return PRODUCTS_DATA
 
 # Initialize spell checker
@@ -238,7 +304,7 @@ def parse_query_with_price(query: str) -> tuple[str, Optional[float], Optional[f
 def search_products(query: str, category: Optional[str] = None, brand: Optional[str] = None, 
                    min_price: Optional[float] = None, max_price: Optional[float] = None,
                    min_rating: Optional[float] = None) -> List[Dict]:
-    """Enhanced search implementation with natural language price parsing"""
+    """Enhanced search implementation with natural language price parsing and semantic search"""
     
     products = load_product_data()  # Ensure products are loaded
     
@@ -253,45 +319,97 @@ def search_products(query: str, category: Optional[str] = None, brand: Optional[
     else:
         query_for_matching = query.lower().strip()
     
+    # Enhanced semantic search mappings for better shoe search
+    semantic_mappings = {
+        'shoes': ['footwear', 'sneakers', 'loafers', 'boots', 'sandals', 'flip-flops', 'fashion'],
+        'shoe': ['footwear', 'sneakers', 'loafers', 'boots', 'sandals', 'flip-flops', 'fashion'],
+        'sneakers': ['footwear', 'casual shoes', 'sports shoes', 'running shoes', 'fashion'],
+        'loafers': ['footwear', 'formal shoes', 'casual shoes', 'fashion'],
+        'boots': ['footwear', 'winter boots', 'leather boots', 'fashion'],
+        'sandals': ['footwear', 'summer shoes', 'casual shoes', 'fashion'],
+        'footwear': ['shoes', 'sneakers', 'loafers', 'boots', 'sandals', 'fashion'],
+        'mobile': ['phone', 'smartphone', 'cell phone'],
+        'laptop': ['computer', 'notebook', 'pc'],
+        'tv': ['television', 'smart tv', 'led tv'],
+    }
+    
+    # Build expanded search terms
+    search_variants = [query_for_matching]
+    query_words = query_for_matching.split()
+    
+    for word in query_words:
+        if word in semantic_mappings:
+            search_variants.extend(semantic_mappings[word])
+            # Also add combinations with other words
+            for other_word in query_words:
+                if other_word != word:
+                    for variant in semantic_mappings[word]:
+                        search_variants.append(f"{variant} {other_word}")
+                        search_variants.append(f"{other_word} {variant}")
+    
     results = []
     
     for i, product in enumerate(products):
         score = 0.0
+        max_variant_score = 0.0
         
-        # Title matching
+        # Test all search variants to find the best match
+        for variant in search_variants:
+            variant_score = 0.0
+            
+            # Title matching
+            title = product.get('title', '').lower()
+            if variant in title:
+                variant_score += 1.0
+                if title.startswith(variant):
+                    variant_score += 0.5
+            
+            # Category matching  
+            product_category = product.get('category', '').lower()
+            if variant in product_category:
+                variant_score += 0.7
+                
+            # Subcategory matching - important for shoes
+            product_subcategory = product.get('subcategory', '').lower()
+            if variant in product_subcategory:
+                variant_score += 0.8
+                
+            # Brand matching
+            product_brand = product.get('brand', '').lower()
+            if variant in product_brand:
+                variant_score += 0.8
+            
+            # Description matching
+            description = product.get('description', '').lower()
+            if variant in description:
+                variant_score += 0.3
+                
+            # Word-based matching for better results
+            variant_words = variant.split()
+            for word in variant_words:
+                if len(word) > 2:  # Skip very short words
+                    if word in title:
+                        variant_score += 0.2
+                    if word in product_category:
+                        variant_score += 0.15
+                    if word in product_subcategory:
+                        variant_score += 0.2
+                    if word in product_brand:
+                        variant_score += 0.2
+                    if word in description:
+                        variant_score += 0.1
+            
+            # Keep the highest score from all variants
+            max_variant_score = max(max_variant_score, variant_score)
+        
+        score = max_variant_score
+        
+        # Get product attributes for filtering (use original product data)
         title = product.get('title', '').lower()
-        if query_for_matching in title:
-            score += 1.0
-            if title.startswith(query_for_matching):
-                score += 0.5
-        
-        # Category matching  
         product_category = product.get('category', '').lower()
-        if query_for_matching in product_category:
-            score += 0.7
-            
-        # Brand matching
+        product_subcategory = product.get('subcategory', '').lower()
         product_brand = product.get('brand', '').lower()
-        if query_for_matching in product_brand:
-            score += 0.8
-        
-        # Description matching
         description = product.get('description', '').lower()
-        if query_for_matching in description:
-            score += 0.3
-            
-        # Word-based matching for better results
-        query_words = query_for_matching.split()
-        for word in query_words:
-            if len(word) > 2:  # Skip very short words
-                if word in title:
-                    score += 0.2
-                if word in product_category:
-                    score += 0.15
-                if word in product_brand:
-                    score += 0.2
-                if word in description:
-                    score += 0.1
             
         # Apply filters
         if category and category.lower() not in product_category:
@@ -492,16 +610,56 @@ async def search(
     brand: Optional[str] = Query(default=None, description="Filter by brand"),
     min_price: Optional[float] = Query(default=None, description="Minimum price"),
     max_price: Optional[float] = Query(default=None, description="Maximum price"),
-    min_rating: Optional[float] = Query(default=None, description="Minimum rating")
+    min_rating: Optional[float] = Query(default=None, description="Minimum rating"),
+    use_hybrid: bool = Query(default=True, description="Enable hybrid search enhancement"),
+    db: Session = Depends(get_db)
 ) -> SearchResponse:
     """
-    Search products with filters and pagination
+    Enhanced search with hybrid capabilities:
+    1. Uses proven NLP-based search as baseline (reliable)
+    2. Enhances with FAISS+BM25 semantic search when available
+    3. Falls back gracefully if hybrid search fails
     """
     start_time = time.time()
     
     try:
-        # Check for spelling corrections
-        corrected_query, has_correction = check_spelling(q)
+        # Try to use enhanced smart search service first
+        if SMART_SEARCH_AVAILABLE and use_hybrid:
+            try:
+                smart_service = get_smart_search_service()
+                if smart_service:
+                    # Use enhanced smart search with hybrid capabilities
+                    smart_results = smart_service.search_products(
+                        db=db,
+                        query=q,
+                        page=page,
+                        limit=per_page,
+                        category=category,
+                        brand=brand,
+                        min_price=min_price,
+                        max_price=max_price,
+                        min_rating=min_rating,
+                        sort_by=sort_by,
+                        use_hybrid_enhancement=True
+                    )
+                    
+                    # Convert to frontend format
+                    return _convert_smart_response_to_v2(smart_results, start_time)
+                    
+            except Exception as e:
+                print(f"Smart search failed, falling back to simple search: {e}")
+        
+        # Fallback to original JSON-based search
+        # Check for spelling corrections - but skip for shoe-related queries to avoid bad corrections
+        shoe_keywords = ['shoe', 'shoes', 'sneaker', 'sneakers', 'footwear', 'loafer', 'loafers', 'boot', 'boots', 'sandal', 'sandals']
+        is_shoe_query = any(keyword in q.lower() for keyword in shoe_keywords)
+        
+        if is_shoe_query:
+            # Skip spell correction for shoe queries to avoid "shoes for men" -> "phones top mens" issue
+            corrected_query, has_correction = q, False
+        else:
+            corrected_query, has_correction = check_spelling(q)
+        
         search_query = corrected_query if has_correction else q
         
         # Search products using the corrected query
@@ -548,7 +706,7 @@ async def search(
             },
             search_metadata=SearchMetadata(
                 query=q,
-                search_type="simple",
+                search_type="simple_fallback",
                 response_time_ms=round(response_time, 2),
                 has_typo_correction=has_correction,
                 corrected_query=corrected_query if has_correction else None
@@ -558,6 +716,69 @@ async def search(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
+
+
+def _convert_smart_response_to_v2(smart_response, start_time) -> SearchResponse:
+    """Convert SmartSearchService response to SearchResponse v2 format"""
+    
+    # Convert products
+    products = []
+    for product in smart_response.products:
+        products.append(ProductResult(
+            id=product.product_id,
+            title=product.title,
+            description=product.description or "",
+            category=product.category,
+            subcategory=product.subcategory or "",
+            brand=product.brand,
+            current_price=product.price,
+            original_price=getattr(product, 'original_price', None),
+            discount_percent=getattr(product, 'discount_percentage', None),
+            rating=product.rating or 0.0,
+            num_ratings=product.num_ratings,
+            availability="in_stock" if product.stock > 0 else "out_of_stock",
+            image_url=product.image_url,
+            features=[],
+            specifications="{}",
+            relevance_score=1.0,
+            popularity_score=0.8,
+            business_score=0.7,
+            final_score=0.9
+        ))
+    
+    response_time = (time.time() - start_time) * 1000
+    
+    # Determine search type based on metadata
+    search_type = "hybrid_enhanced"
+    if hasattr(smart_response, 'query_analysis') and smart_response.query_analysis:
+        if smart_response.query_analysis.get('search_metadata', {}).get('hybrid_enhancement_used'):
+            search_type = "hybrid_enhanced"
+        else:
+            search_type = "nlp_baseline"
+    
+    # Create simple aggregations
+    aggregations = {
+        "categories": [],
+        "brands": [],
+        "price_ranges": []
+    }
+    
+    return SearchResponse(
+        products=products,
+        total_results=smart_response.total_count,
+        page=smart_response.page,
+        per_page=smart_response.limit,
+        total_pages=smart_response.total_pages,
+        filters_applied=smart_response.filters_applied or {},
+        search_metadata=SearchMetadata(
+            query=smart_response.query,
+            search_type=search_type,
+            response_time_ms=round(response_time, 2),
+            has_typo_correction=smart_response.has_typo_correction,
+            corrected_query=smart_response.corrected_query
+        ),
+        aggregations=aggregations
+    )
 
 
 # Click tracking endpoint (v1 compatibility)

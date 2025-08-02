@@ -136,6 +136,12 @@ class SpellChecker:
         if not self.is_initialized or not self.spell_checker:
             return query, False
         
+        # Disable spell checking for shoe-related queries to prevent incorrect corrections
+        shoe_keywords = ['shoe', 'shoes', 'sneaker', 'sneakers', 'loafer', 'loafers', 'boot', 'boots', 'sandal', 'sandals', 'footwear']
+        query_lower = query.lower()
+        if any(keyword in query_lower for keyword in shoe_keywords):
+            return query, False
+        
         try:
             words = query.lower().split()
             corrected_words = []

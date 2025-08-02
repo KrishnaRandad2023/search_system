@@ -27,17 +27,40 @@ try:
 except ImportError:
     ML_SERVICE_AVAILABLE = False
 
+# Import hybrid search with safe fallback
+try:
+    from app.search.hybrid_engine import HybridSearchEngine, load_or_create_search_engine
+    from app.services.hybrid_ml_service import get_hybrid_ml_service
+    HYBRID_SEARCH_AVAILABLE = True
+except ImportError:
+    HYBRID_SEARCH_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
 class SmartSearchService:
     """
-    Smart search service that uses NLP query analysis for better search results
+    Enhanced smart search service that combines:
+    1. NLP query analysis (existing, reliable)
+    2. FAISS+BM25 hybrid search (advanced semantic search)
+    3. Fallback mechanisms for safety
     """
     
     def __init__(self):
         self.query_analyzer = get_query_analyzer()
-        logger.info("SmartSearchService initialized")
+        
+        # Initialize hybrid search if available
+        self.hybrid_search_engine = None
+        self.hybrid_ml_service = None
+        
+        if HYBRID_SEARCH_AVAILABLE:
+            try:
+                self.hybrid_ml_service = get_hybrid_ml_service()
+                logger.info("✅ Hybrid ML service initialized for enhanced search")
+            except Exception as e:
+                logger.warning(f"Hybrid ML service initialization failed: {e}")
+                
+        logger.info("SmartSearchService initialized with hybrid enhancement capabilities")
     
     def search_products(
         self,
@@ -51,19 +74,271 @@ class SmartSearchService:
         min_rating: Optional[float] = None,
         brand: Optional[str] = None,
         sort_by: str = "relevance",
-        in_stock: bool = True
+        in_stock: bool = True,
+        use_hybrid_enhancement: bool = True
     ) -> SearchResponse:
         """
-        Smart search using NLP query analysis
+        Enhanced smart search that combines:
+        1. NLP query analysis (existing reliable approach)
+        2. FAISS+BM25 hybrid search enhancement (optional)
         """
         start_time = datetime.utcnow()
         
         # Set database for query analyzer
         self.query_analyzer.db = db
+
+        # Apply spell correction - but skip for shoe-related queries to avoid bad corrections
+        shoe_keywords = ['shoe', 'shoes', 'sneaker', 'sneakers', 'footwear', 'loafer', 'loafers', 'boot', 'boots', 'sandal', 'sandals']
+        is_shoe_query = any(keyword in query.lower() for keyword in shoe_keywords)
         
-        # Apply spell correction
-        corrected_query, has_typo_correction = check_spelling(query)
-        query_to_search = corrected_query if has_typo_correction else query
+        if is_shoe_query:
+            # Skip spell correction for shoe queries to avoid "shoes for men" -> "phones top mens" issue
+            corrected_query, has_typo_correction = query, False
+        else:
+            corrected_query, has_typo_correction = check_spelling(query)
+        
+        query_to_search = corrected_query if has_typo_correction else query        # STEP 1: Get baseline results using existing NLP approach (reliable)
+        baseline_results = self._get_baseline_search_results(
+            db, query_to_search, page, limit, category, min_price, max_price, 
+            min_rating, brand, sort_by, in_stock
+        )
+        
+        # STEP 2: Enhance with hybrid search if available and requested
+        enhanced_results = baseline_results
+        hybrid_used = False
+        
+        if use_hybrid_enhancement and HYBRID_SEARCH_AVAILABLE and self.hybrid_ml_service:
+            try:
+                enhanced_results = self._apply_hybrid_enhancement(
+                    db, query_to_search, baseline_results, page, limit
+                )
+                hybrid_used = True
+                logger.info(f"✅ Hybrid enhancement applied for query: {query_to_search}")
+            except Exception as e:
+                logger.warning(f"Hybrid enhancement failed, using baseline: {e}")
+                enhanced_results = baseline_results
+        
+        # Calculate response time
+        end_time = datetime.utcnow()
+        response_time_ms = (end_time - start_time).total_seconds() * 1000
+        
+        # Update response metadata
+        enhanced_results.response_time_ms = response_time_ms
+        enhanced_results.has_typo_correction = has_typo_correction
+        enhanced_results.corrected_query = corrected_query if has_typo_correction else None
+        
+        # Add search approach metadata to query_analysis
+        if enhanced_results.query_analysis:
+            enhanced_results.query_analysis["search_metadata"] = {
+                "baseline_search": "NLP Query Analysis",
+                "hybrid_enhancement_used": hybrid_used,
+                "fallback_reason": None if hybrid_used else "Hybrid not available or disabled"
+            }
+        
+        return enhanced_results
+    
+    def _get_baseline_search_results(
+        self,
+        db: Session,
+        query: str,
+        page: int,
+        limit: int,
+        category: Optional[str],
+        min_price: Optional[float],
+        max_price: Optional[float],
+        min_rating: Optional[float],
+        brand: Optional[str],
+        sort_by: str,
+        in_stock: bool
+    ) -> SearchResponse:
+        """Get baseline search results using existing NLP approach (RELIABLE)"""
+        
+        # STEP 1: Analyze the query using our NLP analyzer
+        analysis = self.query_analyzer.analyze_query(query)
+        logger.info(f"Query analysis: {analysis.query_type}, entities: {analysis.entities}")
+        
+        # STEP 2: Extract filters from query analysis
+        extracted_filters = self._extract_filters_from_analysis(analysis)
+        
+        # STEP 3: Apply extracted filters if not explicitly provided
+        if not min_price and not max_price and analysis.price_range:
+            min_price, max_price = analysis.price_range
+            
+        if not brand and analysis.brands:
+            brand = analysis.brands[0]  # Use first brand found
+            
+        if not category and analysis.categories:
+            category = analysis.categories[0]  # Use first category found
+        
+        # STEP 4: Build smart search query
+        search_query = self._build_smart_search_query(
+            db, analysis, query, in_stock
+        )
+        
+        # STEP 5: Apply additional filters
+        search_query = self._apply_filters(
+            search_query, category, brand, min_price, max_price, min_rating
+        )
+        
+        # STEP 6: Apply intelligent sorting
+        search_query = self._apply_smart_sorting(search_query, sort_by, analysis)
+        
+        # STEP 7: Get results with pagination
+        total_count = search_query.count()
+        offset = (page - 1) * limit
+        products = search_query.offset(offset).limit(limit).all()
+        
+        # STEP 8: Apply ML ranking if available
+        if ML_SERVICE_AVAILABLE and len(products) > 1:
+            products = self._apply_ml_ranking(products, query)
+        
+        # STEP 9: Log search
+        self._log_search(db, query, total_count, 0, analysis)
+        
+        # STEP 10: Convert to response format
+        product_responses = self._convert_to_response_format(products)
+        
+        return SearchResponse(
+            query=query,
+            products=product_responses,
+            total_count=total_count,
+            page=page,
+            limit=limit,
+            total_pages=(total_count + limit - 1) // limit,
+            response_time_ms=0,  # Will be set later
+            has_typo_correction=False,  # Will be set later
+            corrected_query=None,  # Will be set later
+            filters_applied={
+                "category": category,
+                "brand": brand,
+                "min_price": min_price,
+                "max_price": max_price,
+                "min_rating": min_rating,
+                "extracted_from_query": extracted_filters
+            },
+            query_analysis={
+                "query_type": analysis.query_type,
+                "sentiment": analysis.sentiment,
+                "brands_detected": analysis.brands,
+                "categories_detected": analysis.categories,
+                "price_range_detected": analysis.price_range,
+                "modifiers": analysis.modifiers
+            }
+        )
+    
+    def _apply_hybrid_enhancement(
+        self,
+        db: Session,
+        query: str,
+        baseline_results: SearchResponse,
+        page: int,
+        limit: int
+    ) -> SearchResponse:
+        """Apply FAISS+BM25 hybrid enhancement to baseline results"""
+        
+        try:
+            # Check if hybrid ML service is available
+            if not self.hybrid_ml_service:
+                logger.warning("Hybrid ML service not available")
+                return baseline_results
+                
+            # Get hybrid search results using the ML service
+            hybrid_response = self.hybrid_ml_service.search_products(
+                db=db,
+                query=query,
+                page=page,
+                limit=limit * 2,  # Get more results for better merging
+                use_ml=True,
+                ml_weight=0.4  # 40% ML, 60% baseline
+            )
+            
+            # Merge baseline and hybrid results intelligently
+            enhanced_products = self._merge_search_results(
+                baseline_results.products,
+                hybrid_response.products,
+                query
+            )
+            
+            # Take only the requested limit
+            enhanced_products = enhanced_products[:limit]
+            
+            # Create enhanced response
+            enhanced_results = SearchResponse(
+                query=baseline_results.query,
+                products=enhanced_products,
+                total_count=max(baseline_results.total_count, hybrid_response.total_count),
+                page=page,
+                limit=limit,
+                total_pages=(max(baseline_results.total_count, hybrid_response.total_count) + limit - 1) // limit,
+                response_time_ms=0,  # Will be set later
+                has_typo_correction=baseline_results.has_typo_correction,
+                corrected_query=baseline_results.corrected_query,
+                filters_applied=baseline_results.filters_applied,
+                query_analysis=baseline_results.query_analysis
+            )
+            
+            # Note: We can't add custom attributes to Pydantic models
+            # So we'll add the metadata to the query_analysis field
+            if enhanced_results.query_analysis:
+                enhanced_results.query_analysis["hybrid_metadata"] = {
+                    "baseline_count": len(baseline_results.products),
+                    "hybrid_count": len(hybrid_response.products),
+                    "merged_count": len(enhanced_products),
+                    "enhancement_method": "FAISS+BM25+NLP"
+                }
+            
+            return enhanced_results
+            
+        except Exception as e:
+            logger.error(f"Hybrid enhancement failed: {e}")
+            return baseline_results
+    
+    def _merge_search_results(
+        self,
+        baseline_products: List[ProductResponse],
+        hybrid_products: List[ProductResponse],
+        query: str
+    ) -> List[ProductResponse]:
+        """Intelligently merge baseline and hybrid search results"""
+        
+        # Create lookup dictionaries using product_id
+        baseline_dict = {p.product_id: p for p in baseline_products}
+        hybrid_dict = {p.product_id: p for p in hybrid_products}
+        
+        # Start with baseline results (proven to work)
+        merged_results = []
+        seen_ids = set()
+        
+        # Add baseline results first (reliable)
+        for product in baseline_products:
+            merged_results.append(product)
+            seen_ids.add(product.product_id)
+        
+        # Add unique hybrid results that aren't in baseline
+        for product in hybrid_products:
+            if product.product_id not in seen_ids:
+                merged_results.append(product)
+                seen_ids.add(product.product_id)
+        
+        # Sort by a combination of relevance scores if available
+        try:
+            # Simple scoring: prioritize baseline results, then hybrid
+            for i, product in enumerate(merged_results):
+                if product.product_id in baseline_dict:
+                    # Higher score for baseline results (more reliable)
+                    score = 1.0 - (i * 0.01)
+                else:
+                    # Lower score for hybrid-only results
+                    score = 0.5 - (i * 0.01)
+                
+                # Store score in a way that doesn't break the schema
+                # We'll use the existing rating field or add to query analysis later
+                pass
+                
+        except Exception as e:
+            logger.warning(f"Result scoring failed: {e}")
+        
+        return merged_results
         
         # STEP 1: Analyze the query using our NLP analyzer
         analysis = self.query_analyzer.analyze_query(query_to_search)

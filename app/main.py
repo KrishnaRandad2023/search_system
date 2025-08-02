@@ -43,6 +43,7 @@ except ImportError:
 from app.config.settings import get_settings
 from app.utils.logger import setup_logging
 from app.db.database import init_db
+from app.services.metrics_counter import metrics_counter
 
 
 # Setup logging
@@ -110,6 +111,72 @@ app.add_middleware(
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+@app.middleware("http")
+async def track_api_calls(request: Request, call_next):
+    """Track API calls for real-time metrics"""
+    start_time = time.time()
+    
+    # Increment API call counter for all routes except analytics
+    if not request.url.path.startswith("/analytics"):
+        metrics_counter.increment_api_call()
+        
+        # Track specific feature usage based on endpoints
+        path = request.url.path.lower()
+        query_params = str(request.url.query).lower()
+        
+        # Track search calls specifically
+        if "/search" in path:
+            metrics_counter.increment_search_call()
+            
+            # Track different search types
+            if "hybrid" in path or "hybrid" in query_params:
+                metrics_counter.increment_hybrid_search()
+            elif "semantic" in path or "semantic" in query_params:
+                metrics_counter.increment_semantic_search()
+            
+            # Track ML ranking usage (if ml parameter is present)
+            if "ml=true" in query_params or "ranking" in path:
+                metrics_counter.increment_ml_ranking()
+                
+        # Track autosuggest usage
+        elif "autosuggest" in path or "suggest" in path:
+            metrics_counter.increment_autosuggest()
+            
+        # Track feedback submissions
+        elif "feedback" in path:
+            metrics_counter.increment_feedback()
+            
+        # Track filter usage (if filter parameters are present)
+        if any(param in query_params for param in ["category=", "brand=", "price", "filter"]):
+            metrics_counter.increment_filter_usage()
+            
+        # Track category searches
+        if "category=" in query_params:
+            import urllib.parse
+            try:
+                parsed_query = urllib.parse.parse_qs(request.url.query)
+                if "category" in parsed_query:
+                    category = parsed_query["category"][0]
+                    metrics_counter.increment_category_search(category)
+            except:
+                pass
+    
+    response = await call_next(request)
+    
+    # Track response time for performance metrics
+    if not request.url.path.startswith("/analytics"):
+        response_time_ms = (time.time() - start_time) * 1000
+        metrics_counter.add_response_time(response_time_ms)
+        
+        # Track zero results (if we can detect it from response)
+        if hasattr(response, 'status_code') and response.status_code == 200:
+            # This is a basic check - you might want to examine response content
+            # to detect actual zero results
+            pass
+    
+    return response
 
 
 @app.middleware("http")
