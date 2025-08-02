@@ -1,3 +1,7 @@
+PLEASE REFER SETUP GUILDE FOR IMPLEMETATION
+
+
+
 # 🚀 Flipkart Grid 7.0 - Advanced AI Search System
 
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://python.org)
