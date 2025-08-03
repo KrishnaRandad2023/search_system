@@ -207,6 +207,19 @@ def init_spell_checker():
             word = ''.join(c for c in word if c.isalnum())
             if len(word) > 2:  # Skip very short words
                 word_counts[word] = word_counts.get(word, 0) + 1
+                
+    # IMPORTANT: Add price/quantity terms to prevent bad corrections like "20k" -> "20l"
+    price_terms = {
+        '10k': 100, '15k': 100, '20k': 100, '25k': 100, '30k': 100,
+        '40k': 100, '50k': 100, '60k': 100, '70k': 100, '80k': 100,
+        '90k': 100, '100k': 100, 'under': 90, 'below': 80, 'above': 75,
+        'within': 70, 'around': 65, 'near': 60, 'budget': 85,
+        'mobile': 95, 'phone': 90, 'smartphone': 85, 'laptop': 95
+    }
+    
+    # Merge price terms with higher priority
+    for term, count in price_terms.items():
+        word_counts[term] = max(word_counts.get(term, 0), count)
     
     # Add words to spell checker
     for word, count in word_counts.items():
@@ -227,9 +240,30 @@ def check_spelling(query: str) -> tuple[str, bool]:
     has_correction = False
     
     for word in words:
-        # Skip numbers and very short words
+        # Skip numbers, very short words, and price patterns like "20k"
         if word.isdigit() or len(word) < 3:
             corrected_words.append(word)
+            continue
+            
+        # Skip price patterns like "20k", "30k", etc.
+        if len(word) <= 4 and word.endswith('k') and word[:-1].isdigit():
+            corrected_words.append(word)
+            continue
+            
+        # Handle common typos manually for better accuracy
+        common_typos = {
+            'mobilw': 'mobile',
+            'moblie': 'mobile',
+            'mobil': 'mobile',
+            'moble': 'mobile',
+            'phoen': 'phone',
+            'lapotop': 'laptop',
+            'labtop': 'laptop'
+        }
+        
+        if word in common_typos:
+            corrected_words.append(common_typos[word])
+            has_correction = True
             continue
             
         # Get spell suggestions
@@ -262,13 +296,17 @@ def parse_query_with_price(query: str) -> tuple[str, Optional[float], Optional[f
     
     # Patterns to match price expressions
     price_patterns = [
-        # "under X", "below X", "less than X"
+        # "under X", "below X", "less than X" - handle both raw numbers and "k" format
+        (r'\b(?:under|below|less\s+than|<)\s*(\d+)k\b', 'max_k'),
         (r'\b(?:under|below|less\s+than|<)\s*(\d+)\b', 'max'),
-        # "above X", "over X", "more than X"  
+        # "above X", "over X", "more than X" - handle both raw numbers and "k" format  
+        (r'\b(?:above|over|more\s+than|>)\s*(\d+)k\b', 'min_k'),
         (r'\b(?:above|over|more\s+than|>)\s*(\d+)\b', 'min'),
-        # "between X and Y", "X to Y"
+        # "between X and Y", "X to Y" - handle "k" format
+        (r'\b(?:between|from)\s*(\d+)k\s*(?:and|to|-)\s*(\d+)k\b', 'range_k'),
         (r'\b(?:between|from)\s*(\d+)\s*(?:and|to|-)\s*(\d+)\b', 'range'),
-        # "around X", "about X" (±20%)
+        # "around X", "about X" (±20%) - handle "k" format
+        (r'\b(?:around|about|near)\s*(\d+)k\b', 'around_k'),
         (r'\b(?:around|about|near)\s*(\d+)\b', 'around'),
     ]
     
@@ -276,12 +314,26 @@ def parse_query_with_price(query: str) -> tuple[str, Optional[float], Optional[f
     for pattern, price_type in price_patterns:
         match = re.search(pattern, query_lower)
         if match:
-            if price_type == 'max':
+            if price_type == 'max_k':
+                max_price = float(match.group(1)) * 1000  # Convert K to actual amount
+                # Remove the matched price expression from search terms
+                search_terms = re.sub(pattern, '', query_lower).strip()
+            elif price_type == 'max':
                 max_price = float(match.group(1))
                 # Remove the matched price expression from search terms
                 search_terms = re.sub(pattern, '', query_lower).strip()
+            elif price_type == 'min_k':
+                min_price = float(match.group(1)) * 1000  # Convert K to actual amount
+                search_terms = re.sub(pattern, '', query_lower).strip()
             elif price_type == 'min':
                 min_price = float(match.group(1))
+                search_terms = re.sub(pattern, '', query_lower).strip()
+            elif price_type == 'range_k':
+                min_price = float(match.group(1)) * 1000  # Convert K to actual amount
+                max_price = float(match.group(2)) * 1000  # Convert K to actual amount
+                # Ensure min <= max
+                if min_price > max_price:
+                    min_price, max_price = max_price, min_price
                 search_terms = re.sub(pattern, '', query_lower).strip()
             elif price_type == 'range':
                 min_price = float(match.group(1))
@@ -289,6 +341,12 @@ def parse_query_with_price(query: str) -> tuple[str, Optional[float], Optional[f
                 # Ensure min <= max
                 if min_price > max_price:
                     min_price, max_price = max_price, min_price
+                search_terms = re.sub(pattern, '', query_lower).strip()
+            elif price_type == 'around_k':
+                center_price = float(match.group(1)) * 1000  # Convert K to actual amount
+                # ±20% range
+                min_price = center_price * 0.8
+                max_price = center_price * 1.2  
                 search_terms = re.sub(pattern, '', query_lower).strip()
             elif price_type == 'around':
                 center_price = float(match.group(1))
@@ -681,12 +739,23 @@ async def search(
         
         search_query = corrected_query if has_correction else q
         
-        # Search products using the corrected query
-        all_results = search_products(search_query, category, brand, min_price, max_price, min_rating)
+        # Extract price constraints from query if not explicitly provided
+        extracted_min_price, extracted_max_price = min_price, max_price
+        if min_price is None and max_price is None:
+            search_terms, parsed_min_price, parsed_max_price = parse_query_with_price(search_query)
+            if parsed_min_price is not None:
+                extracted_min_price = parsed_min_price
+            if parsed_max_price is not None:
+                extracted_max_price = parsed_max_price
+            # Use cleaned search terms for matching
+            search_query = search_terms if search_terms.strip() else search_query
+        
+        # Search products using the corrected query and extracted prices
+        all_results = search_products(search_query, category, brand, extracted_min_price, extracted_max_price, min_rating)
         
         # If no results with corrected query, try original query
         if has_correction and len(all_results) == 0:
-            all_results = search_products(q, category, brand, min_price, max_price, min_rating)
+            all_results = search_products(q, category, brand, extracted_min_price, extracted_max_price, min_rating)
             has_correction = False  # Don't show correction if it didn't help
             corrected_query = q
         
@@ -719,8 +788,8 @@ async def search(
             filters_applied={
                 "category": category,
                 "brand": brand,
-                "min_price": min_price,
-                "max_price": max_price,
+                "min_price": extracted_min_price,
+                "max_price": extracted_max_price,
                 "min_rating": min_rating
             },
             search_metadata=SearchMetadata(

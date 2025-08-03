@@ -693,14 +693,16 @@ class SmartSearchService:
         
         # Apply spell correction first - but skip for shoe/mobile queries to avoid bad corrections
         shoe_keywords = ['shoe', 'shoes', 'sneaker', 'sneakers', 'footwear', 'loafer', 'loafers', 'boot', 'boots', 'sandal', 'sandals']
-        mobile_keywords = ['mobile', 'phone', 'smartphone', 'cellphone', 'iphone', 'android']
+        mobile_keywords = ['phone', 'smartphone', 'cellphone', 'iphone', 'android']  # Removed 'mobile' to allow correction of 'mobilw'
         skip_spell_check = any(keyword in query.lower() for keyword in shoe_keywords + mobile_keywords)
         
         if skip_spell_check:
             # Skip spell correction for shoe/mobile queries to avoid bad corrections
             corrected_query, has_typo_correction = query, False
+            print(f"🔍 DEBUG: Skipped spell check for query: '{query}'")
         else:
             corrected_query, has_typo_correction = check_spelling(query)
+            print(f"🔍 DEBUG: Spell check - Original: '{query}' -> Corrected: '{corrected_query}' (Changed: {has_typo_correction})")
         
         # Use corrected query for all subsequent operations
         effective_query = corrected_query if has_typo_correction else query

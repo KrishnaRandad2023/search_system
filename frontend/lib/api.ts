@@ -3,7 +3,7 @@
  * Handles all communication with the FastAPI backend
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Types for API responses
 export interface AutosuggestItem {
@@ -75,8 +75,8 @@ export interface SearchResponse {
   aggregations: {
     categories: Array<{ name: string; count: number }>;
     brands: Array<{ name: string; count: number }>;
-    price_ranges: Array<{ range: string; count: number }>;
-    ratings: Array<{ rating: number; count: number }>;
+    price_ranges: Array<{ name: string; count: number }>;
+    ratings: Array<{ name: string; count: number }>;
   };
 }
 

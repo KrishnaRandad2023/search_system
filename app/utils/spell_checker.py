@@ -99,7 +99,12 @@ class SpellChecker:
                 'bluetooth': 30, 'gaming': 40, 'fitness': 35,
                 'samsung': 80, 'apple': 85, 'oneplus': 70,
                 'xiaomi': 65, 'realme': 60, 'oppo': 55,
-                'vivo': 55, 'nokia': 50, 'motorola': 45
+                'vivo': 55, 'nokia': 50, 'motorola': 45,
+                # Add price/quantity terms to prevent bad corrections
+                '10k': 100, '15k': 100, '20k': 100, '25k': 100, '30k': 100,
+                '40k': 100, '50k': 100, '60k': 100, '70k': 100, '80k': 100,
+                '90k': 100, '100k': 100, 'under': 90, 'below': 80, 'above': 75,
+                'within': 70, 'around': 65, 'near': 60, 'budget': 85
             }
             
             # Merge common terms
@@ -146,8 +151,13 @@ class SpellChecker:
             has_correction = False
             
             for word in words:
-                # Skip numbers, very short words, and special characters
-                if word.isdigit() or len(word) < 3 or not word.isalpha():
+                # Skip numbers, very short words, special characters, and price patterns
+                if word.isdigit() or len(word) < 3 or not word.replace('k', '').replace('l', '').isalnum():
+                    corrected_words.append(word)
+                    continue
+                
+                # Skip price patterns like "20k", "30k", etc.
+                if len(word) <= 4 and word.endswith('k') and word[:-1].isdigit():
                     corrected_words.append(word)
                     continue
                 
@@ -214,6 +224,9 @@ class SpellChecker:
             
             # Category typos
             'moblie': 'mobile',
+            'mobilw': 'mobile',
+            'mobil': 'mobile',
+            'moble': 'mobile',
             'compuer': 'computer',
             'electronis': 'electronics',
             'clothng': 'clothing',
